@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 FLAGS=" -Werror=shadow "
 if [[ -n "${GITHUB_ACTIONS+isset}" ]]; then
