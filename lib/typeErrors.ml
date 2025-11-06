@@ -94,18 +94,18 @@ type message =
   | Missing_resource of
       { requests : RequestChain.t;
         situation : situation;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Merging_multiple_arrays of
       { requests : RequestChain.t;
         situation : situation;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Unused_resource of
       { resource : Res.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Illtyped_binary_it of
@@ -119,52 +119,52 @@ type message =
       { ct : Sctypes.t;
         location : IT.t;
         value : IT.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Int_unrepresentable of
       { value : IT.t;
         ict : Sctypes.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Unproven_constraint of
       { constr : LC.t;
         requests : RequestChain.t;
         info : Locations.info;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Undefined_behaviour of
       { ub : CF.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Needs_alloc_id of
       { ptr : IT.t;
         ub : CF.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Alloc_out_of_bounds of
       { term : IT.t;
         constr : IT.t;
         ub : CF.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Allocation_not_live of
       { reason :
           [ `Copy_alloc_id | `Ptr_cmp | `Ptr_diff | `ISO_array_shift | `ISO_member_shift ];
         ptr : IT.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model_constr : (Solver.model_with_q * IT.t) option
       }
   (* | Implementation_defined_behaviour of document * state_report *)
   | Unspecified of CF.Ctype.ctype
   | StaticError of
       { err : string;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Generic of Pp.document [@deprecated "Please add a specific constructor"]
@@ -172,11 +172,11 @@ type message =
   | Generic_with_model of
       { err : document;
         model : Solver.model_with_q;
-        ctxt : Context.t * Explain.log
+        ctxt : Context.t * Explain.log * Trace.t
       } [@deprecated "Please add a specific constructor"]
   | Unsupported of document
   | Empty_provenance
-  | Inconsistent_assumptions of string * (Context.t * Explain.log)
+  | Inconsistent_assumptions of string * (Context.t * Explain.log * Trace.t)
   | Byte_conv_needs_owned
   | Double_spec of
       { fname : Sym.t;
@@ -190,12 +190,12 @@ type message =
   | Not_impl_ghost_args_in_pure_C_function
   | Unspecified_byte_to_int of
       { constr : LC.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
   | Converting_from_unspecified_bytes of
       { constr : LC.t;
-        ctxt : Context.t * Explain.log;
+        ctxt : Context.t * Explain.log * Trace.t;
         model : Solver.model_with_q
       }
 

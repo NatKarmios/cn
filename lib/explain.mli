@@ -32,4 +32,4 @@ type state_extras =
 val no_ex : state_extras
 
 (** Generate a report describing what went wrong. *)
-val trace : Context.t * log -> Solver.model_with_q -> state_extras -> Report.report
+val trace : Context.t * log * 'a -> Solver.model_with_q -> state_extras -> Report.report
