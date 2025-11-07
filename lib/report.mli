@@ -29,7 +29,7 @@ type simp_view =
     simplified : Pp.document list (* simplified based on model *)
   }
 
-(** Labels for classifying items in a view *)
+(** Labels for classifying itesm in a view *)
 type label
 
 (** Interesting things that are shown by default *)

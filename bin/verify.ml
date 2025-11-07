@@ -113,7 +113,6 @@ let verify
                  ~serialize_json:json_trace
                  err)
             errors;
-        let@ () = dump_trace () in
         Option.fold ~none:() ~some:exit (Common.exit_code_of_errors (List.map snd errors));
         Check.generate_lemmas lemmas lemmata
       in

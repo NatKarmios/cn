@@ -386,7 +386,7 @@ let state (ctxt : C.t) log model_with_q extras =
   Rp.{ where; invalid_resources; not_given_to_solver; terms; resources; constraints }
 
 
-let trace (ctxt, log, _) (model_with_q : Solver.model_with_q) (extras : state_extras) =
+let trace (ctxt, log) (model_with_q : Solver.model_with_q) (extras : state_extras) =
   let prev = !Pp.html_escapes in
   Pp.html_escapes := true;
   (* let req_cmp = Option.bind extras.request (Spans.spans_compare_for_pp model

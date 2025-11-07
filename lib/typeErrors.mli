@@ -37,18 +37,18 @@ type message =
   | Missing_resource of
       { requests : RequestChain.t;
         situation : Error_common.situation;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Merging_multiple_arrays of
       { requests : RequestChain.t;
         situation : Error_common.situation;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Unused_resource of
       { resource : Resource.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Illtyped_binary_it of
@@ -62,51 +62,51 @@ type message =
       { ct : Sctypes.t;
         location : IndexTerms.t;
         value : IndexTerms.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Int_unrepresentable of
       { value : IndexTerms.t;
         ict : Sctypes.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Unproven_constraint of
       { constr : LogicalConstraints.t;
         requests : RequestChain.t;
         info : Locations.info;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Undefined_behaviour of
       { ub : Cerb_frontend.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Needs_alloc_id of
       { ptr : IndexTerms.t;
         ub : Cerb_frontend.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Alloc_out_of_bounds of
       { term : IndexTerms.t;
         constr : IndexTerms.t;
         ub : Cerb_frontend.Undefined.undefined_behaviour;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Allocation_not_live of
       { reason :
           [ `Copy_alloc_id | `ISO_array_shift | `ISO_member_shift | `Ptr_cmp | `Ptr_diff ];
         ptr : IndexTerms.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model_constr : (Solver.model_with_q * IndexTerms.t) option
       }
   | Unspecified of Cerb_frontend.Ctype.ctype
   | StaticError of
       { err : string; (** TODO replace with an actual type *)
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Generic of Pp.document [@deprecated "Please add a specific constructor"]
@@ -114,11 +114,11 @@ type message =
   | Generic_with_model of
       { err : Pp.document;
         model : Solver.model_with_q;
-        ctxt : Context.t * Explain.log * Trace.t
+        ctxt : Context.t * Explain.log
       } [@deprecated "Please add a specific constructor"] (** TODO delete this too *)
   | Unsupported of Pp.document (** TODO add source location *)
   | Empty_provenance
-  | Inconsistent_assumptions of string * (Context.t * Explain.log * Trace.t)
+  | Inconsistent_assumptions of string * (Context.t * Explain.log)
   (** TODO replace string with an actual type *)
   | Byte_conv_needs_owned
   | Double_spec of
@@ -133,12 +133,12 @@ type message =
   | Not_impl_ghost_args_in_pure_C_function
   | Unspecified_byte_to_int of
       { constr : LogicalConstraints.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
   | Converting_from_unspecified_bytes of
       { constr : LogicalConstraints.t;
-        ctxt : Context.t * Explain.log * Trace.t;
+        ctxt : Context.t * Explain.log;
         model : Solver.model_with_q
       }
 

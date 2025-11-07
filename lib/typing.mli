@@ -4,7 +4,7 @@ type 'a t
 
 type 'a m = 'a t
 
-type failure = Context.t * Explain.log * Trace.t -> TypeErrors.t
+type failure = Context.t * Explain.log -> TypeErrors.t
 
 type 'a pause
 
@@ -17,8 +17,6 @@ val pure : 'a m -> 'a m
 val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 
 val fail : failure -> 'a m
-
-val dump_trace : unit -> unit m
 
 val run : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
 
