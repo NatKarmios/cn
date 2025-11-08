@@ -25,33 +25,73 @@ let empty_s (c : Context.t) =
   }
 
 
+module Trace_args = struct
+  type breakpoint = Explain.log_entry
+
+  type case = Case of int
+
+  (* Using a single variant here to allow the cyclic type abbreviation *)
+  type 'a next = Next of s * (s -> ('a, breakpoint, case, 'a next) Trace.trace)
+
+  let bind_next ~bind (Next (s, n)) f : 'b next = Next (s, fun s' -> bind (n s') f)
+
+  let compute_next (Next (s, n)) =
+    (* TODO: handle solver backtracking *)
+    n s
+end
+
+open Trace_args
+module T = Trace.Make (Trace_args)
+
 type 'a pause = ('a * s, TypeErrors.t) Result.t
 
-type 'a t = s -> ('a * s, TypeErrors.t) Result.t
+type 'a t = s -> ('a * s, TypeErrors.t) Result.t T.t
 
 type 'a m = 'a t
 
 type failure = Context.t * Explain.log -> TypeErrors.t
 
+let end_ok x s = Trace.End (Ok (x, s))
+
+let end_error e = Trace.End (Error e)
+
 (* basic functions *)
 
-let return (a : 'a) : 'a t = fun s -> Ok (a, s)
+let return (a : 'a) : 'a t = fun s -> end_ok a s
 
-let fail (f : failure) : 'a t = fun s -> Error (f (s.typing_context, s.log))
+let fail (f : failure) : 'a t = fun s -> end_error @@ f (s.typing_context, s.log)
 
 let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
-  fun s -> match m s with Error e -> Error e | Ok (x, s') -> (f x) s'
+  fun s ->
+  let t = m s in
+  T.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
 
 
 let ( let@ ) = bind
 
-let get () : s t = fun s -> Ok (s, s)
+let breakpoint (l : Explain.log_entry) : unit t =
+  fun s ->
+  let next = Next (s, end_ok ()) in
+  Trace.Breakpoint (l, next)
+
+
+let choice (cases : (case * 'a t) list) : 'a t =
+  fun s -> Trace.Choice (List.map_snd (fun m -> Next (s, m)) cases)
+
+
+let get () : s t = fun s -> end_ok s s
 
 (* due to solver interaction, this has to be used carefully *)
-let set (s' : s) : unit t = fun _s -> Ok ((), s')
+let set (s' : s) : unit t = fun _s -> end_ok () s'
+
+let run' (f : 'b -> 'a -> 'b) (acc : 'b) (c : Context.t) (m : 'a t) : 'b Or_TypeError.t =
+  let f acc (x, _) = f acc x in
+  empty_s c |> m |> T.flaky_fold f acc
+
 
 let run (c : Context.t) (m : 'a t) : 'a Or_TypeError.t =
-  match m (empty_s c) with Ok (a, _) -> Ok a | Error e -> Error e
+  let f acc x = match acc with Some _ -> acc | None -> Some x in
+  run' f None c m |> Result.map Option.get
 
 
 let run_to_pause (c : Context.t) (m : 'a t) : 'a pause =
@@ -92,7 +132,7 @@ let sandbox (m : 'a t) : 'a Or_TypeError.t t =
 
 
 let lift (m : 'a Or_TypeError.t) : 'a m =
-  fun s -> match m with Ok r -> Ok (r, s) | Error e -> Error e
+  fun s -> match m with Ok r -> end_ok r s | Error e -> end_error e
 
 
 (* end basic functions *)
@@ -145,15 +185,21 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify (f : s -> s) : unit t =
+let modify (f : s -> s * breakpoint option) : unit t =
   let@ s = get () in
-  set (f s)
+  let s', log = f s in
+  let m = set s' in
+  match log with
+  | Some log ->
+    let@ () = breakpoint log in
+    m
+  | None -> m
 
 
 let get_typing_context () : Context.t t = inspect (fun s -> s.typing_context)
 
 let set_typing_context (c : Context.t) : unit t =
-  modify (fun s -> { s with typing_context = c })
+  modify (fun s -> ({ s with typing_context = c }, None))
 
 
 let inspect_typing_context (f : Context.t -> 'a) : 'a t =
@@ -179,14 +225,17 @@ let set_global (g : Global.t) : unit t =
 
 
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
-  modify (fun s -> { s with log = Action (a, loc) :: s.log })
+  modify (fun s ->
+    let log_entry = Explain.Action (a, loc) in
+    ({ s with log = log_entry :: s.log }, Some log_entry))
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
   modify (fun s ->
-    let log = Explain.State s.typing_context :: s.log in
+    let log_entry = Explain.State s.typing_context in
+    let log = log_entry :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
-    { s with log; typing_context })
+    ({ s with log; typing_context }, Some log_entry))
 
 
 module ErrorReader = struct
