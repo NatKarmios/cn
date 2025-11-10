@@ -64,29 +64,33 @@ let return (a : 'a) : 'a t = fun s -> end_ok a s
 
 let fail (f : failure) : 'a t = fun s -> end_error @@ f (s.typing_context, s.log)
 
+let set_solver_frame (s : s) =
+  Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver
+
+
 let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
   fun s ->
-  Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
+  set_solver_frame s;
   let t = m s in
   T.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
 
 
 let ( let@ ) = bind
 
-let with_new_solver_frame ?(set_now = false) (s : s) =
+let with_new_solver_frame (s : s) =
   let solver =
     match s.solver with
-    | Some (solver, frame) ->
-      let frame' = Solver.new_frame frame in
-      if set_now then
-        Solver.set_frame solver frame';
-      Some (solver, frame)
+    | Some (solver, frame) -> Some (solver, Solver.new_frame frame)
     | None -> None
   in
   { s with solver }
 
 
-let push_solver = with_new_solver_frame ~set_now:true
+let push_solver s =
+  let s' = with_new_solver_frame s in
+  set_solver_frame s';
+  s'
+
 
 let breakpoint (l : Explain.log_entry) : unit t =
   fun s ->
@@ -155,10 +159,9 @@ let pause_to_result (pause : 'a pause) : 'a Or_TypeError.t = Result.map fst paus
 
 let pure (m : 'a t) : 'a t =
   fun s ->
-  let solver = s.solver in
   let s' = push_solver s in
   let t = m s' in
-  T.map t @@ Result.map @@ fun (x, s'') -> (x, { s'' with solver })
+  T.map t @@ Result.map @@ fun (x, _) -> (x, s)
 
 
 let sandbox (m : 'a t) : 'a Or_TypeError.t t =

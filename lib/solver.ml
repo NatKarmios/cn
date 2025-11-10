@@ -141,9 +141,6 @@ let new_frame prev = empty_solver_frame ~prev ()
 (** "Resets" the solver to a desired scope *)
 let set_frame s desired =
   let to_pop, to_push = find_common_ancestor !(s.cur_frame) desired in
-  (match (to_pop, List.length to_push) with
-   | 0, 0 -> ()
-   | x, y -> Format.printf "to_pop: %d, to_push: %d\n" x y);
   pop s to_pop;
   let rec push_all = function
     | [], [] -> ()

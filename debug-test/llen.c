@@ -42,6 +42,6 @@ unsigned int llen(sll_t* l)
     if (l == 0) {
         return 0;
     } else {
-        return llen(l->tail);
+        return llen(l->tail) + 1;
     }
 }

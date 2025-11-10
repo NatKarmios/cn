@@ -2040,6 +2040,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     in
     check_pexpr c_pe (fun carg ->
       let aux lc _nm e =
+        let@ () = return () in
         let@ () = add_c loc (LC.T lc) in
         let@ provable = provable loc in
         let here = Locations.other __LOC__ in
@@ -2050,6 +2051,13 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
       let@ () = pure (aux carg "true" e1) in
       let@ () = pure (aux (not_ carg loc) "false" e2) in
       return ())
+    (* let@ lc, e = choose [ (carg, e1); (not_ carg loc, e2) ] in *)
+    (* let@ () = add_c loc (LC.T lc) in *)
+    (* let@ provable = provable loc in *)
+    (* let here = Locations.other __LOC__ in *)
+    (* match provable (LC.T (bool_ false here)) with *)
+    (* | `True -> return () *)
+    (* | `False -> check_expr labels e k) *)
   | Ebound e ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e) ~expect (Mu.bt_of_expr e) in
     check_expr labels e k
