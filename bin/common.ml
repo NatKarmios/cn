@@ -191,10 +191,12 @@ let with_well_formedness_check
       in
       print_log_file ("mucore", `MUCORE prog5);
       let paused =
-        Typing.run_to_pause Context.empty (Check.check_decls_lemmata_fun_specs prog5)
+        Typing.run_to_pause_single
+          Context.empty
+          (Check.check_decls_lemmata_fun_specs prog5)
       in
       Result.iter_error handle_error (Typing.pause_to_result paused);
-      let@ _ = f ~cabs_tunit ~prog5 ~ail_prog ~statement_locs ~paused in
+      let@ () = f ~cabs_tunit ~prog5 ~ail_prog ~statement_locs ~paused in
       Option.iter
         (fun path ->
            let prologue = Pp_mucore_coq.pp_prologue () in

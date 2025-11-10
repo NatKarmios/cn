@@ -8,9 +8,11 @@ let unfold_multiclause_preds = ref false
 
 type solver = Solver.solver
 
+type solver_frame = Solver.solver_frame
+
 type s =
   { typing_context : Context.t;
-    solver : solver option;
+    solver : (solver * solver_frame) option;
     sym_eqs : IT.t Sym.Map.t;
     movable_indices : (Req.name * IT.t) list;
     log : Explain.log
@@ -37,6 +39,7 @@ module Trace_args = struct
 
   let compute_next (Next (s, n)) =
     (* TODO: handle solver backtracking *)
+    Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
     n s
 end
 
@@ -63,11 +66,27 @@ let fail (f : failure) : 'a t = fun s -> end_error @@ f (s.typing_context, s.log
 
 let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
   fun s ->
+  Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
   let t = m s in
   T.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
 
 
 let ( let@ ) = bind
+
+let with_new_solver_frame ?(set_now = false) (s : s) =
+  let solver =
+    match s.solver with
+    | Some (solver, frame) ->
+      let frame' = Solver.new_frame frame in
+      if set_now then
+        Solver.set_frame solver frame';
+      Some (solver, frame)
+    | None -> None
+  in
+  { s with solver }
+
+
+let push_solver = with_new_solver_frame ~set_now:true
 
 let breakpoint (l : Explain.log_entry) : unit t =
   fun s ->
@@ -75,60 +94,78 @@ let breakpoint (l : Explain.log_entry) : unit t =
   Trace.Breakpoint (l, next)
 
 
-let choice (cases : (case * 'a t) list) : 'a t =
-  fun s -> Trace.Choice (List.map_snd (fun m -> Next (s, m)) cases)
+let choice (cases : 'a t list) : 'a t =
+  fun s ->
+  let choices =
+    cases
+    |> List.mapi
+       @@ fun i m ->
+       let s' = with_new_solver_frame s in
+       (Case i, Next (s', m))
+  in
+  Trace.Choice choices
 
+
+let choose (cases : 'a list) : 'a t = choice (List.map return cases)
 
 let get () : s t = fun s -> end_ok s s
 
 (* due to solver interaction, this has to be used carefully *)
 let set (s' : s) : unit t = fun _s -> end_ok () s'
 
-let run' (f : 'b -> 'a -> 'b) (acc : 'b) (c : Context.t) (m : 'a t) : 'b Or_TypeError.t =
-  let f acc (x, _) = f acc x in
-  empty_s c |> m |> T.flaky_fold f acc
+let flaky_fold (f : 'b -> 'a -> s -> 'b) (acc : 'b) (s : s) (m : 'a t) : 'b Or_TypeError.t
+  =
+  let f acc (x, s) = f acc x s in
+  T.flaky_fold f acc (m s)
 
 
-let run (c : Context.t) (m : 'a t) : 'a Or_TypeError.t =
-  let f acc x = match acc with Some _ -> acc | None -> Some x in
-  run' f None c m |> Result.map Option.get
+let run_unit' s m =
+  let f () () _ = () in
+  flaky_fold f () s m
 
 
-let run_to_pause (c : Context.t) (m : 'a t) : 'a pause =
-  match m (empty_s c) with Ok (a, s) -> Ok (a, s) | Error e -> Error e
+let get_single_result = function
+  | Ok [ x ] -> Ok x
+  | Ok _ -> assert false
+  | Error e -> Error e
 
 
-let run_from_pause (f : 'a -> 'b t) (pause : 'a pause) =
-  match pause with Ok (a, s) -> Result.map fst @@ f a s | Error e -> Error e
+let run_single' s m =
+  let f acc r s = (r, s) :: acc in
+  flaky_fold f [] s m |> get_single_result
+
+
+let run_to_pause_single (c : Context.t) (m : 'a t) : 'a pause = run_single' (empty_s c) m
+
+let run_from_pause_unit (f : 'a -> unit t) (pause : 'a pause) =
+  Result.bind pause @@ fun (x, s) -> run_unit' s (f x)
+
+
+let run_from_pause_single (f : 'a -> 'b t) (pause : 'a pause) =
+  Result.bind pause @@ fun (x, s) -> run_single' s (f x) |> Result.map fst
+
+
+let run_unit (c : Context.t) (m : unit t) : unit Or_TypeError.t = run_unit' (empty_s c) m
+
+let run_single (c : Context.t) (m : 'a t) : 'a Or_TypeError.t =
+  run_to_pause_single c m |> Result.map fst
 
 
 let pause_to_result (pause : 'a pause) : 'a Or_TypeError.t = Result.map fst pause
 
 let pure (m : 'a t) : 'a t =
   fun s ->
-  Option.iter Solver.push s.solver;
-  let outcome = match m s with Ok (a, _) -> Ok (a, s) | Error e -> Error e in
-  Option.iter (fun s -> Solver.pop s 1) s.solver;
-  outcome
+  let solver = s.solver in
+  let s' = push_solver s in
+  let t = m s' in
+  T.map t @@ Result.map @@ fun (x, s'') -> (x, { s'' with solver })
 
 
 let sandbox (m : 'a t) : 'a Or_TypeError.t t =
   fun s ->
-  let n = Solver.num_scopes (Option.get s.solver) in
-  Solver.push (Option.get s.solver);
-  let outcome =
-    match m s with
-    | Ok (a, _s') ->
-      assert (Solver.num_scopes (Option.get s.solver) = n + 1);
-      Solver.pop (Option.get s.solver) 1;
-      Ok a
-    | Error e ->
-      let n' = Solver.num_scopes (Option.get s.solver) in
-      assert (n' > n);
-      Solver.pop (Option.get s.solver) (n' - n);
-      Error e
-  in
-  Ok (outcome, s)
+  let s' = push_solver s in
+  let t = m s' in
+  T.map t @@ function Ok (x, _) -> Ok (Ok x, s) | Error e -> Ok (Error e, s)
 
 
 let lift (m : 'a Or_TypeError.t) : 'a m =
@@ -164,7 +201,7 @@ let make_provable loc ({ typing_context = s; solver; _ } as c) =
   let f ?(purpose = "") lc =
     Solver.provable
       ~loc
-      ~solver:(Option.get solver)
+      ~solver:(Option.get solver |> fst)
       ~assumptions:s.constraints
       ~simp_ctxt
       ~purpose
@@ -185,7 +222,7 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify (f : s -> s * breakpoint option) : unit t =
+let modify' (f : s -> s * breakpoint option) : unit t =
   let@ s = get () in
   let s', log = f s in
   let m = set s' in
@@ -196,10 +233,12 @@ let modify (f : s -> s * breakpoint option) : unit t =
   | None -> m
 
 
+let modify (f : s -> s) : unit t = modify' (fun s -> (f s, None))
+
 let get_typing_context () : Context.t t = inspect (fun s -> s.typing_context)
 
 let set_typing_context (c : Context.t) : unit t =
-  modify (fun s -> ({ s with typing_context = c }, None))
+  modify (fun s -> { s with typing_context = c })
 
 
 let inspect_typing_context (f : Context.t -> 'a) : 'a t =
@@ -225,13 +264,13 @@ let set_global (g : Global.t) : unit t =
 
 
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
-  modify (fun s ->
+  modify' (fun s ->
     let log_entry = Explain.Action (a, loc) in
     ({ s with log = log_entry :: s.log }, Some log_entry))
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
-  modify (fun s ->
+  modify' (fun s ->
     let log_entry = Explain.State s.typing_context in
     let log = log_entry :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
@@ -379,7 +418,7 @@ let maybe_declare_variable_in_solver sym bt =
   let@ s = get () in
   match s.solver with
   | None -> return ()
-  | Some solver -> return (Solver.declare_variable solver (sym, bt))
+  | Some (solver, _) -> return (Solver.declare_variable solver (sym, bt))
 
 
 let add_a sym bt info =
@@ -427,7 +466,7 @@ let remove_as = iterM remove_a
 
 (* similar but less boring functions, where components interact *)
 
-let get_solver () : solver t = inspect (fun s -> Option.get s.solver)
+let get_solver () : solver t = inspect (fun s -> Option.get s.solver |> fst)
 
 let init_solver () =
   modify (fun s ->
@@ -441,7 +480,7 @@ let init_solver () =
       Sym.Map.fold add_binding c.logical (Sym.Map.fold add_binding c.computational [])
     in
     let solver = Solver.make c.global to_declare in
-    LC.Set.iter (Solver.assume solver) c.constraints;
+    LC.Set.iter (Solver.assume (fst solver)) c.constraints;
     { s with solver = Some solver })
 
 

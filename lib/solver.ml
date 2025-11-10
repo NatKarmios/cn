@@ -41,14 +41,23 @@ module CN_Names = struct
 end
 
 type solver_frame =
-  { mutable commands : SMT.sexp list (** Ack-style SMT commands, most recent first. *) }
+  { mutable commands : SMT.sexp list; (** Ack-style SMT commands, most recent first. *)
+    prev : solver_frame option;
+    num_scopes : int
+  }
 
-let empty_solver_frame () = { commands = [] }
+let empty_solver_frame ?prev () =
+  let num_scopes = match prev with Some prev -> prev.num_scopes + 1 | None -> 0 in
+  { commands = []; prev; num_scopes }
+
+
+let rec list_of_frames frame =
+  frame :: Option.fold ~some:list_of_frames ~none:[] frame.prev
+
 
 type solver =
   { smt_solver : SMT.solver; (** The SMT solver connection. *)
     cur_frame : solver_frame ref;
-    prev_frames : solver_frame list ref;
       (** Push/pop model. Current frame, and previous frames. *)
     globals : Global.t;
     ctypes : int CTypeMap.t;
@@ -68,12 +77,12 @@ module Debug = struct
 
   let dump_solver solver =
     !^"\n|~~~~~~ Start Solver Dump ~~~~~~~|"
-    ^/^ separate_map hardline dump_frame (!(solver.cur_frame) :: !(solver.prev_frames))
+    ^/^ separate_map hardline dump_frame (list_of_frames !(solver.cur_frame))
     ^/^ !^"|~~~~~~ End Solver Dump ~~~~~~~~~|"
 end
 
 let get_commands s =
-  let frames = !(s.cur_frame) :: !(s.prev_frames) in
+  let frames = list_of_frames !(s.cur_frame) in
   List.concat_map (fun f -> f.commands) frames
 
 
@@ -88,8 +97,7 @@ let debug_ack_command s cmd =
 (** Start a new scope. *)
 let push s =
   debug_ack_command s (SMT.push 1);
-  s.prev_frames := !(s.cur_frame) :: !(s.prev_frames);
-  s.cur_frame := empty_solver_frame ()
+  s.cur_frame := empty_solver_frame ~prev:!(s.cur_frame) ()
 
 
 (** Return to the previous scope.  Assumes that there is a previous scope. *)
@@ -98,20 +106,59 @@ let pop s n =
     ()
   else (
     debug_ack_command s (SMT.pop n);
-    let rec drop count xs =
-      match xs with
-      | new_cur :: new_rest ->
-        if count = 1 then (
-          s.cur_frame := new_cur;
-          s.prev_frames := new_rest)
-        else
-          drop (count - 1) new_rest
+    let rec drop count frame =
+      match (count, frame.prev) with
+      | 0, _ -> s.cur_frame := frame
+      | _, Some prev_frame -> drop (count - 1) prev_frame
       | _ -> assert false
     in
-    drop n !(s.prev_frames))
+    drop n !(s.cur_frame))
 
 
-let num_scopes s = List.length !(s.prev_frames)
+let find_common_ancestor current desired =
+  let rec aux current desired to_pop to_push =
+    if current.num_scopes > desired.num_scopes then
+      aux (Option.get current.prev) desired (to_pop + 1) to_push
+    else if current.num_scopes < desired.num_scopes then
+      aux current (Option.get desired.prev) to_pop (List.rev desired.commands :: to_push)
+    else if current != desired then
+      aux
+        (Option.get current.prev)
+        (Option.get desired.prev)
+        (to_pop + 1)
+        (List.rev desired.commands :: to_push)
+    else
+      (to_pop, to_push)
+  in
+  try aux current desired 0 [] with
+  | Invalid_argument _ ->
+    debug 30 (lazy !^"malformed solver frames");
+    assert false
+
+
+let new_frame prev = empty_solver_frame ~prev ()
+
+(** "Resets" the solver to a desired scope *)
+let set_frame s desired =
+  let to_pop, to_push = find_common_ancestor !(s.cur_frame) desired in
+  (match (to_pop, List.length to_push) with
+   | 0, 0 -> ()
+   | x, y -> Format.printf "to_pop: %d, to_push: %d\n" x y);
+  pop s to_pop;
+  let rec push_all = function
+    | [], [] -> ()
+    | [], f :: fs ->
+      debug_ack_command s (SMT.push 1);
+      push_all (f, fs)
+    | cmd :: cmds, fs ->
+      debug_ack_command s cmd;
+      push_all (cmds, fs)
+  in
+  push_all ([], to_push);
+  s.cur_frame := desired
+
+
+let num_scopes s = !(s.cur_frame).num_scopes
 
 (** Do an ack_style command. These are logged. *)
 let ack_command s cmd =
@@ -1201,7 +1248,6 @@ let make globals variable_bindings =
   let s =
     { smt_solver = SMT.new_solver cfg;
       cur_frame = ref (empty_solver_frame ());
-      prev_frames = ref [];
       ctypes;
       ctypes_rev;
       globals;
@@ -1214,7 +1260,7 @@ let make globals variable_bindings =
   List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg);
   List.iter (SMT.ack_command s.smt_solver) (SMT.otimeout cfg !inc_timeout);
   declare_solver_basics s variable_bindings;
-  s
+  (s, !(s.cur_frame))
 
 
 (* ---------------------------------------------------------------------------*)

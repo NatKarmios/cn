@@ -18,11 +18,19 @@ val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 
 val fail : failure -> 'a m
 
-val run : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
+val choice : 'a m list -> 'a m
 
-val run_to_pause : Context.t -> 'a m -> 'a pause
+val choose : 'a list -> 'a m
 
-val run_from_pause : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t
+val run_unit : Context.t -> unit m -> (unit, TypeErrors.t) Result.t
+
+val run_single : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
+
+val run_to_pause_single : Context.t -> 'a m -> 'a pause
+
+val run_from_pause_unit : ('a -> unit m) -> 'a pause -> (unit, TypeErrors.t) Result.t
+
+val run_from_pause_single : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t
 
 val pause_to_result : 'a pause -> ('a, TypeErrors.t) Result.t
 

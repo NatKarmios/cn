@@ -159,7 +159,7 @@ module Make (AD : Domain.T) = struct
     : Def.t
     =
     let f () =
-      Typing.run_from_pause
+      Typing.run_from_pause_single
         (fun _ ->
            let open Typing in
            let@ () = init_solver () in

@@ -1,6 +1,8 @@
 (* Module Solver -- Interface to the SMT solver via SMTLIB *)
 type solver
 
+type solver_frame
+
 type model
 
 (** Model with quantifier instantiations *)
@@ -25,7 +27,7 @@ val inc_enabled : bool ref
 val inc_timeout : int option ref
 
 (* Create a solver *)
-val make : Global.t -> (Sym.t * BaseTypes.t) list -> solver
+val make : Global.t -> (Sym.t * BaseTypes.t) list -> solver * solver_frame
 
 (* Incrementally (and imperatively) add an assumption to the solver state *)
 val assume : solver -> LogicalConstraints.t -> unit
@@ -33,9 +35,9 @@ val assume : solver -> LogicalConstraints.t -> unit
 val declare_variable : solver -> Sym.t * BaseTypes.t -> unit
 
 (* Save / restore solver state, to support backtracking *)
-val push : solver -> unit
+val new_frame : solver_frame -> solver_frame
 
-val pop : solver -> int -> unit
+val set_frame : solver -> solver_frame -> unit
 
 (** Number of scopes in the solver. Currently only used by [Typing.sandbox],
     but may be unnecessary https://github.com/rems-project/cerberus/issues/752 *)

@@ -116,7 +116,7 @@ let verify
         Option.fold ~none:() ~some:exit (Common.exit_code_of_errors (List.map snd errors));
         Check.generate_lemmas lemmas lemmata
       in
-      Typing.run_from_pause check paused)
+      Typing.run_from_pause_unit check paused)
 
 
 open Cmdliner

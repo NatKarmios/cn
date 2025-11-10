@@ -68,7 +68,8 @@ let of_instrumentation
       decls
   in
   let context =
-    Result.get_ok (Typing.run_from_pause (fun _ -> Typing.get_typing_context ()) paused)
+    Result.get_ok
+      (Typing.run_from_pause_single (fun _ -> Typing.get_typing_context ()) paused)
   in
   let module WellTyped =
     WellTyped.Lift (struct
