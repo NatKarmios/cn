@@ -28,23 +28,24 @@ let empty_s (c : Context.t) =
 
 
 module Trace_args = struct
-  type breakpoint = Explain.log_entry
+  type breakpoint =
+    | Log_entry of Explain.log_entry
+    | Msg of string
 
   type case = Case of int
 
-  (* Using a single variant here to allow the cyclic type abbreviation *)
-  type 'a next = Next of s * (s -> ('a, breakpoint, case, 'a next) Trace.trace)
+  type 'a next = s * (s -> 'a)
 
-  let bind_next ~bind (Next (s, n)) f : 'b next = Next (s, fun s' -> bind (n s') f)
+  let map_next (s, n) f = (s, fun s' -> f (n s'))
 
-  let compute_next (Next (s, n)) =
+  let compute_next (s, n) =
     (* TODO: handle solver backtracking *)
     Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
     n s
 end
 
 open Trace_args
-module T = Trace.Make (Trace_args)
+module T = Trace.Make_memoized (Trace_args)
 
 type 'a pause = ('a * s, TypeErrors.t) Result.t
 
@@ -92,25 +93,28 @@ let push_solver s =
   s'
 
 
-let breakpoint (l : Explain.log_entry) : unit t =
+let breakpoint (l : T.breakpoint) : unit t =
   fun s ->
-  let next = Next (s, end_ok ()) in
+  let next = T.next (s, end_ok ()) in
   Trace.Breakpoint (l, next)
 
 
 let choice (cases : 'a t list) : 'a t =
   fun s ->
+  Format.printf "Choice!\n";
   let choices =
     cases
     |> List.mapi
        @@ fun i m ->
        let s' = with_new_solver_frame s in
-       (Case i, Next (s', m))
+       (Case i, T.next (s', m))
   in
   Trace.Choice choices
 
 
 let choose (cases : 'a list) : 'a t = choice (List.map return cases)
+
+let trace_msg (msg : string) : unit t = breakpoint (Msg msg)
 
 let get () : s t = fun s -> end_ok s s
 
@@ -119,6 +123,7 @@ let set (s' : s) : unit t = fun _s -> end_ok () s'
 
 let flaky_fold (f : 'b -> 'a -> s -> 'b) (acc : 'b) (s : s) (m : 'a t) : 'b Or_TypeError.t
   =
+  Format.printf "fold\n";
   let f acc (x, s) = f acc x s in
   T.flaky_fold f acc (m s)
 
@@ -225,13 +230,13 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify' (f : s -> s * breakpoint option) : unit t =
+let modify' (f : s -> s * Explain.log_entry option) : unit t =
   let@ s = get () in
   let s', log = f s in
   let m = set s' in
   match log with
   | Some log ->
-    let@ () = breakpoint log in
+    let@ () = breakpoint (Log_entry log) in
     m
   | None -> m
 

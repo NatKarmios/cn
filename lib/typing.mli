@@ -22,6 +22,8 @@ val choice : 'a m list -> 'a m
 
 val choose : 'a list -> 'a m
 
+val trace_msg : string -> unit m
+
 val run_unit : Context.t -> unit m -> (unit, TypeErrors.t) Result.t
 
 val run_single : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
