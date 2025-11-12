@@ -22,6 +22,10 @@ val choice : 'a m list -> 'a m
 
 val choose : 'a list -> 'a m
 
+val collect : ('b -> 'a -> 'b) -> 'b -> 'a t -> 'b t
+
+val collect_results : ('b -> 'a Or_TypeError.t -> 'b) -> 'b -> 'a t -> 'b t
+
 val trace_msg : string -> unit m
 
 val run_unit : Context.t -> unit m -> (unit, TypeErrors.t) Result.t

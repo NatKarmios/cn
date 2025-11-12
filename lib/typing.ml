@@ -28,13 +28,14 @@ let empty_s (c : Context.t) =
 
 
 module Trace_args = struct
-  type breakpoint =
+  type 'a next = s * (s -> 'a)
+
+  type 'nest breakpoint =
     | Log_entry of Explain.log_entry
     | Msg of string
+    | Nest of string * 'nest
 
   type case = Case of int
-
-  type 'a next = s * (s -> 'a)
 
   let map_next (s, n) f = (s, fun s' -> f (n s'))
 
@@ -42,10 +43,15 @@ module Trace_args = struct
     (* TODO: handle solver backtracking *)
     Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
     n s
+
+
+  let get_nested = function Nest (_, nest) -> [ nest ] | _ -> []
 end
 
 open Trace_args
 module T = Trace.Make_memoized (Trace_args)
+
+type breakpoint = unit T.next Trace_args.breakpoint
 
 type 'a pause = ('a * s, TypeErrors.t) Result.t
 
@@ -93,10 +99,10 @@ let push_solver s =
   s'
 
 
-let breakpoint (l : T.breakpoint) : unit t =
+let breakpoint (b : breakpoint) : unit t =
   fun s ->
   let next = T.next (s, end_ok ()) in
-  Trace.Breakpoint (l, next)
+  Trace.Breakpoint (T.breakpoint b, next)
 
 
 let choice (cases : 'a t list) : 'a t =
@@ -113,6 +119,43 @@ let choice (cases : 'a t list) : 'a t =
 
 
 let choose (cases : 'a list) : 'a t = choice (List.map return cases)
+
+let collect_results (f : 'b -> 'a Or_TypeError.t -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+  fun s ->
+  let f = fun acc r -> f acc (Result.map fst r) in
+  let sub = T.next (with_new_solver_frame s, m) in
+  let sub' = T.bind_next sub (fun _ -> End ()) in
+  let b = Nest ("lol", sub') in
+  let m' =
+    fun s' ->
+    let t = T.compute_next sub in
+    let x = T.fold f acc t in
+    end_ok x s'
+  in
+  let next = T.next (with_new_solver_frame s, m') in
+  Trace.Breakpoint (T.breakpoint b, next)
+
+
+let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+  fun s ->
+  let f = fun acc (x, _) -> f acc x in
+  let sub = T.next (with_new_solver_frame s, m) in
+  let sub' = T.bind_next sub (fun _ -> End ()) in
+  let b = Nest ("lol", sub') in
+  let m' =
+    fun s' ->
+    let t = T.compute_next sub in
+    let r = T.flaky_fold f acc t |> Result.map (fun x -> (x, s')) in
+    Trace.End r
+  in
+  let next = T.next (with_new_solver_frame s, m') in
+  Trace.Breakpoint (T.breakpoint b, next)
+
+
+(* let@ () = breakpoint ~subtrace:m (Msg "lol") in *)
+(* let@ s = get () in *)
+(* let r = flaky_fold f acc s m in *)
+(* End r *)
 
 let trace_msg (msg : string) : unit t = breakpoint (Msg msg)
 
