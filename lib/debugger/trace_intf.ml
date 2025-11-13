@@ -33,13 +33,13 @@ module type S = sig
 
   type 'a t = ('a, breakpoint, case, 'a next) trace
 
-  and breakpoint = Breakpoint of unit next breakpoint'
+  and breakpoint = Bp of unit next breakpoint'
 
   val compute_next : 'a next -> 'a t
 
   val next : 'a t next' -> 'a next
 
-  val breakpoint : unit next breakpoint' -> breakpoint
+  val breakpoint : unit next breakpoint' -> 'a t next' -> 'a t
 
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 

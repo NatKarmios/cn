@@ -226,6 +226,8 @@ val unicode : bool ref
 
 val print_level : int ref
 
+val no_stdout : bool ref
+
 val print_timestamps : bool ref
 
 val html_langle : document

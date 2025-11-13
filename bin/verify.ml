@@ -325,3 +325,123 @@ let cmd =
   in
   let info = Cmd.info "verify" ~doc in
   Cmd.v info verify_t
+
+
+module Debug = struct
+  let verify_debug
+        filename
+        cc
+        macros
+        permissive
+        incl_dirs
+        incl_files
+        loc_pp
+        print_sym_nums
+        diag
+        only
+        skip
+        solver_logging
+        solver_flags
+        solver_path
+        solver_type
+        solver_inc_enabled
+        solver_inc_timeout
+        astprints
+        dont_use_vip
+        no_inherit_loc
+        magic_comment_char_dollar
+        allow_split_magic_comments
+        disable_resource_derived_constraints
+        try_hard
+        disable_unfold_multiclause_preds
+        check_consistency
+    =
+    (*flags *)
+    Cerb_debug.debug_level := 0;
+    Pp.loc_pp := loc_pp;
+    Pp.print_level := 0;
+    Pp.no_stdout := true;
+    Sym.print_nums := print_sym_nums;
+    Pp.print_timestamps := false;
+    (match solver_logging with
+     | Some d ->
+       Solver.Logger.to_file := true;
+       Solver.Logger.dir := if String.equal d "" then None else Some d
+     | _ -> ());
+    Solver.solver_path := solver_path;
+    Solver.solver_type := solver_type;
+    Solver.solver_flags := solver_flags;
+    Solver.try_hard := try_hard;
+    Solver.inc_enabled := solver_inc_enabled;
+    Solver.inc_timeout := solver_inc_timeout;
+    IndexTerms.use_vip := not dont_use_vip;
+    Diagnostics.diag_string := diag;
+    Resource.disable_resource_derived_constraints := disable_resource_derived_constraints;
+    Prooflog.set_enabled false;
+    Typing.unfold_multiclause_preds := not disable_unfold_multiclause_preds;
+    let filename = Common.there_can_only_be_one filename in
+    let wf_check =
+      Common.check_well_formedness
+        ~filename
+        ~cc
+        ~macros:(("__CN_VERIFY", None) :: macros)
+        ~permissive
+        ~incl_dirs
+        ~incl_files
+        ~astprints
+        ~no_inherit_loc
+        ~magic_comment_char_dollar
+        ~allow_split_magic_comments
+        ~save_cpp:None
+        ~disable_linemarkers:false
+        ~skip_label_inlining:false
+    in
+    let paused =
+      match wf_check with Ok (_, _, _, _, p) -> p | Error _ -> failwith "help"
+    in
+    let check (functions, global_var_constraints, _) =
+      Check.time_check_c_functions
+        (skip, only)
+        check_consistency
+        (global_var_constraints, functions)
+    in
+    let trace = Typing.run_from_pause check paused in
+    ()
+
+
+  let verify_debug_t : unit Term.t =
+    let open Term in
+    const verify_debug
+    $ Common.Flags.file
+    $ Common.Flags.cc
+    $ Common.Flags.macros
+    $ Common.Flags.permissive
+    $ Common.Flags.incl_dirs
+    $ Common.Flags.incl_files
+    $ Flags.loc_pp
+    $ Common.Flags.print_sym_nums
+    $ Flags.diag
+    $ Flags.only
+    $ Flags.skip
+    $ Flags.solver_logging
+    $ Flags.solver_flags
+    $ Flags.solver_path
+    $ Flags.solver_type
+    $ Flags.solver_inc_enabled
+    $ Flags.solver_inc_timeout
+    $ Common.Flags.astprints
+    $ Flags.dont_use_vip
+    $ Common.Flags.no_inherit_loc
+    $ Common.Flags.magic_comment_char_dollar
+    $ Common.Flags.allow_split_magic_comments
+    $ Flags.disable_resource_derived_constraints
+    $ Flags.try_hard
+    $ Flags.disable_unfold_multiclause_preds
+    $ Flags.check_consistency
+
+
+  let cmd =
+    let doc = "Begins a SEDAP session for verification" in
+    let info = Cmd.info "debug-verify" ~doc in
+    Cmd.v info verify_debug_t
+end

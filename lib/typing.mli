@@ -4,6 +4,19 @@ type 'a t
 
 type 'a m = 'a t
 
+module Trace : sig
+  type 'nest breakpoint' =
+    | Log_entry of Explain.log_entry
+    | Nest of string * 'nest
+
+  type 'a next'
+
+  include
+    Debugger.Trace.S
+    with type 'nest breakpoint' := 'nest breakpoint'
+     and type 'a next' := 'a next'
+end
+
 type failure = Context.t * Explain.log -> TypeErrors.t
 
 type 'a pause
@@ -22,21 +35,29 @@ val choice : 'a m list -> 'a m
 
 val choose : 'a list -> 'a m
 
-val collect : ('b -> 'a -> 'b) -> 'b -> 'a t -> 'b t
+val collect_pauses : ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
 
-val collect_results : ('b -> 'a Or_TypeError.t -> 'b) -> 'b -> 'a t -> 'b t
+val collect : ('b -> 'a -> 'b) -> 'b -> 'a t -> ('b, TypeErrors.t) Result.t t
 
-val trace_msg : string -> unit m
+val collect_unit : unit t -> (unit, TypeErrors.t) Result.t t
 
-val run_unit : Context.t -> unit m -> (unit, TypeErrors.t) Result.t
+val run : Context.t -> 'a m -> 'a pause Trace.t
+
+val run_unit : Context.t -> 'a m -> (unit, TypeErrors.t) Result.t
 
 val run_single : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
 
-val run_to_pause_single : Context.t -> 'a m -> 'a pause
+val run_to_single_pause : Context.t -> 'a m -> 'a pause
 
-val run_from_pause_unit : ('a -> unit m) -> 'a pause -> (unit, TypeErrors.t) Result.t
+val run_from_pause : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t Trace.t
+
+val run_from_pause' : ('a -> 'b m) -> 'a pause -> 'b pause Trace.t
+
+val run_from_pause_unit : ('a -> 'b m) -> 'a pause -> (unit, TypeErrors.t) Result.t
 
 val run_from_pause_single : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t
+
+val run_from_pause_single' : ('a -> 'b m) -> 'a pause -> 'b pause
 
 val pause_to_result : 'a pause -> ('a, TypeErrors.t) Result.t
 

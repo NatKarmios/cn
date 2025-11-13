@@ -2039,25 +2039,13 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
       WellTyped.ensure_base_type (Mu.loc_of_pexpr c_pe) ~expect:Bool (Mu.bt_of_pexpr c_pe)
     in
     check_pexpr c_pe (fun carg ->
-      let aux lc _nm e =
-        let@ () = return () in
-        let@ () = add_c loc (LC.T lc) in
-        let@ provable = provable loc in
-        let here = Locations.other __LOC__ in
-        match provable (LC.T (bool_ false here)) with
-        | `True -> return ()
-        | `False -> check_expr labels e k
-      in
-      let@ () = pure (aux carg "true" e1) in
-      let@ () = pure (aux (not_ carg loc) "false" e2) in
-      return ())
-    (* let@ lc, e = choose [ (carg, e1); (not_ carg loc, e2) ] in *)
-    (* let@ () = add_c loc (LC.T lc) in *)
-    (* let@ provable = provable loc in *)
-    (* let here = Locations.other __LOC__ in *)
-    (* match provable (LC.T (bool_ false here)) with *)
-    (* | `True -> return () *)
-    (* | `False -> check_expr labels e k) *)
+      let@ lc, e = choose [ (carg, e1); (not_ carg loc, e2) ] in
+      let@ () = add_c loc (LC.T lc) in
+      let@ provable = provable loc in
+      let here = Locations.other __LOC__ in
+      match provable (LC.T (bool_ false here)) with
+      | `True -> return ()
+      | `False -> check_expr labels e k)
   | Ebound e ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e) ~expect (Mu.bt_of_expr e) in
     check_expr labels e k
@@ -2749,7 +2737,7 @@ let check_c_functions_fast (funs : c_function list) : (string * TypeErrors.t) op
     | Some _ -> return (num_checked, prev_error)
     | None ->
       let fn_name = c_function_name c_fn in
-      let@ outcome = sandbox (check_c_function c_fn) in
+      let@ outcome = collect_unit (check_c_function c_fn) in
       let checked = num_checked + 1 in
       (match outcome with
        | Ok () ->
@@ -2775,7 +2763,7 @@ let check_c_functions_all (funs : c_function list) : (string * TypeErrors.t) lis
   let total = List.length funs in
   let check_and_record (num_checked, errors) c_fn =
     let fn_name = c_function_name c_fn in
-    let@ outcome = sandbox (check_c_function c_fn) in
+    let@ outcome = collect_unit (check_c_function c_fn) in
     let checked = num_checked + 1 in
     match outcome with
     | Ok () ->

@@ -34,6 +34,8 @@ let z i = string (Z.to_string i)
 
 let bool b = if b then string "true" else string "false"
 
+let no_stdout = ref false
+
 let html_escapes = ref false
 
 let unicode = ref true
@@ -54,8 +56,9 @@ let angles doc = langle () ^^ doc ^^ rangle ()
 
 (* from run_pp *)
 let print channel doc =
-  PPrint.ToChannel.pretty 1.0 term_col channel (doc ^^ hardline);
-  flush channel
+  if (not !no_stdout) || channel != stdout then (
+    PPrint.ToChannel.pretty 1.0 term_col channel (doc ^^ hardline);
+    flush channel)
 
 
 (* adapting from pipeline.ml *)

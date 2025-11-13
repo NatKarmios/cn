@@ -3,6 +3,7 @@ module Req = Request
 module LC = LogicalConstraints
 module Loc = Locations
 module IT = IndexTerms
+module T = Debugger.Trace
 
 let unfold_multiclause_preds = ref false
 
@@ -27,43 +28,51 @@ let empty_s (c : Context.t) =
   }
 
 
-module Trace_args = struct
-  type 'a next = s * (s -> 'a)
-
-  type 'nest breakpoint =
+module Trace = struct
+  type 'nest breakpoint' =
     | Log_entry of Explain.log_entry
-    | Msg of string
     | Nest of string * 'nest
 
-  type case = Case of int
+  type 'a next' = s * (s -> 'a)
 
-  let map_next (s, n) f = (s, fun s' -> f (n s'))
+  type case' = Case of int
 
-  let compute_next (s, n) =
-    (* TODO: handle solver backtracking *)
-    Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
-    n s
+  module Args = struct
+    type 'a next = 'a next'
+
+    type 'a breakpoint = 'a breakpoint'
+
+    type nonrec case = case'
+
+    let map_next (s, n) f = (s, fun s' -> f (n s'))
+
+    let compute_next (s, n) =
+      Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
+      n s
 
 
-  let get_nested = function Nest (_, nest) -> [ nest ] | _ -> []
+    let get_nested = function Nest (_, nest) -> [ nest ] | _ -> []
+  end
+
+  include T.Make_memoized (Args)
 end
 
-open Trace_args
-module T = Trace.Make_memoized (Trace_args)
+open T
+open Trace
 
-type breakpoint = unit T.next Trace_args.breakpoint
+type breakpoint = unit Trace.next Trace.breakpoint'
 
 type 'a pause = ('a * s, TypeErrors.t) Result.t
 
-type 'a t = s -> ('a * s, TypeErrors.t) Result.t T.t
+type 'a t = s -> ('a * s, TypeErrors.t) Result.t Trace.t
 
 type 'a m = 'a t
 
 type failure = Context.t * Explain.log -> TypeErrors.t
 
-let end_ok x s = Trace.End (Ok (x, s))
+let end_ok x s = End (Ok (x, s))
 
-let end_error e = Trace.End (Error e)
+let end_error e = End (Error e)
 
 (* basic functions *)
 
@@ -79,7 +88,7 @@ let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
   fun s ->
   set_solver_frame s;
   let t = m s in
-  T.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
+  Trace.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
 
 
 let ( let@ ) = bind
@@ -99,124 +108,116 @@ let push_solver s =
   s'
 
 
-let breakpoint (b : breakpoint) : unit t =
-  fun s ->
-  let next = T.next (s, end_ok ()) in
-  Trace.Breakpoint (T.breakpoint b, next)
-
+let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_ok ())
 
 let choice (cases : 'a t list) : 'a t =
   fun s ->
-  Format.printf "Choice!\n";
   let choices =
     cases
     |> List.mapi
        @@ fun i m ->
        let s' = with_new_solver_frame s in
-       (Case i, T.next (s', m))
+       (Case i, Trace.next (s', m))
   in
-  Trace.Choice choices
+  T.Choice choices
 
 
 let choose (cases : 'a list) : 'a t = choice (List.map return cases)
 
-let collect_results (f : 'b -> 'a Or_TypeError.t -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
   fun s ->
-  let f = fun acc r -> f acc (Result.map fst r) in
-  let sub = T.next (with_new_solver_frame s, m) in
-  let sub' = T.bind_next sub (fun _ -> End ()) in
+  let sub = next (with_new_solver_frame s, m) in
+  let sub' = bind_next sub (fun _ -> End ()) in
   let b = Nest ("lol", sub') in
   let m' =
     fun s' ->
-    let t = T.compute_next sub in
-    let x = T.fold f acc t in
+    let t = compute_next sub in
+    let x = fold f acc t in
     end_ok x s'
   in
-  let next = T.next (with_new_solver_frame s, m') in
-  Trace.Breakpoint (T.breakpoint b, next)
+  Trace.breakpoint b (with_new_solver_frame s, m')
 
 
-let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
   fun s ->
   let f = fun acc (x, _) -> f acc x in
-  let sub = T.next (with_new_solver_frame s, m) in
-  let sub' = T.bind_next sub (fun _ -> End ()) in
+  let sub = next (with_new_solver_frame s, m) in
+  let sub' = bind_next sub (fun _ -> End ()) in
   let b = Nest ("lol", sub') in
-  let m' =
+  let m' : 'b Or_TypeError.t t =
     fun s' ->
-    let t = T.compute_next sub in
-    let r = T.flaky_fold f acc t |> Result.map (fun x -> (x, s')) in
-    Trace.End r
+    let t = compute_next sub in
+    let r = flaky_fold f acc t in
+    end_ok r s'
   in
-  let next = T.next (with_new_solver_frame s, m') in
-  Trace.Breakpoint (T.breakpoint b, next)
+  Trace.breakpoint b (with_new_solver_frame s, m')
 
 
-(* let@ () = breakpoint ~subtrace:m (Msg "lol") in *)
-(* let@ s = get () in *)
-(* let r = flaky_fold f acc s m in *)
-(* End r *)
-
-let trace_msg (msg : string) : unit t = breakpoint (Msg msg)
+let collect_unit = collect (fun () () -> ()) ()
 
 let get () : s t = fun s -> end_ok s s
 
 (* due to solver interaction, this has to be used carefully *)
 let set (s' : s) : unit t = fun _s -> end_ok () s'
 
-let flaky_fold (f : 'b -> 'a -> s -> 'b) (acc : 'b) (s : s) (m : 'a t) : 'b Or_TypeError.t
-  =
-  Format.printf "fold\n";
-  let f acc (x, s) = f acc x s in
-  T.flaky_fold f acc (m s)
+let fold_unit (t : 'a pause Trace.t) : unit Or_TypeError.t =
+  let f () _ = () in
+  flaky_fold f () t
 
 
-let run_unit' s m =
-  let f () () _ = () in
-  flaky_fold f () s m
-
-
-let get_single_result = function
-  | Ok [ x ] -> Ok x
+let fold_single (t : 'a pause Trace.t) : 'a pause =
+  let f acc p = p :: acc in
+  match flaky_fold f [] t with
+  | Ok [ p ] -> Ok p
   | Ok _ -> assert false
   | Error e -> Error e
 
 
-let run_single' s m =
-  let f acc r s = (r, s) :: acc in
-  flaky_fold f [] s m |> get_single_result
+let pause_to_result (pause : 'a pause) : 'a Or_TypeError.t = Result.map fst pause
 
+let run (c : Context.t) (m : 'a t) : 'a pause Trace.t = m (empty_s c)
 
-let run_to_pause_single (c : Context.t) (m : 'a t) : 'a pause = run_single' (empty_s c) m
+let run_unit (c : Context.t) (m : 'a t) : unit Or_TypeError.t = run c m |> fold_unit
 
-let run_from_pause_unit (f : 'a -> unit t) (pause : 'a pause) =
-  Result.bind pause @@ fun (x, s) -> run_unit' s (f x)
-
-
-let run_from_pause_single (f : 'a -> 'b t) (pause : 'a pause) =
-  Result.bind pause @@ fun (x, s) -> run_single' s (f x) |> Result.map fst
-
-
-let run_unit (c : Context.t) (m : unit t) : unit Or_TypeError.t = run_unit' (empty_s c) m
+let run_to_single_pause (c : Context.t) (m : 'a t) : 'a pause = run c m |> fold_single
 
 let run_single (c : Context.t) (m : 'a t) : 'a Or_TypeError.t =
-  run_to_pause_single c m |> Result.map fst
+  run_to_single_pause c m |> Result.map fst
 
 
-let pause_to_result (pause : 'a pause) : 'a Or_TypeError.t = Result.map fst pause
+let run_from_pause' (f : 'a -> 'b t) (pause : 'a pause) : 'b pause Trace.t =
+  match pause with Ok (x, s) -> (f x) s | Error e -> End (Error e)
+
+
+let run_from_pause (f : 'a -> 'b t) (pause : 'a pause) : 'b Or_TypeError.t Trace.t =
+  let t = run_from_pause' f pause in
+  Trace.map t (Result.map fst)
+
+
+let run_from_pause_unit (f : 'a -> 'b t) (pause : 'a pause) : unit Or_TypeError.t =
+  run_from_pause' f pause |> fold_unit
+
+
+let run_from_pause_single' (f : 'a -> 'b t) (pause : 'a pause) : 'b pause =
+  run_from_pause' f pause |> fold_single
+
+
+let run_from_pause_single (f : 'a -> 'b t) (pause : 'a pause) : 'b Or_TypeError.t =
+  run_from_pause_single' f pause |> pause_to_result
+
 
 let pure (m : 'a t) : 'a t =
   fun s ->
   let s' = push_solver s in
   let t = m s' in
-  T.map t @@ Result.map @@ fun (x, _) -> (x, s)
+  Trace.map t @@ Result.map @@ fun (x, _) -> (x, s)
 
 
 let sandbox (m : 'a t) : 'a Or_TypeError.t t =
   fun s ->
   let s' = push_solver s in
   let t = m s' in
-  T.map t @@ function Ok (x, _) -> Ok (Ok x, s) | Error e -> Ok (Error e, s)
+  Trace.map t @@ function Ok (x, _) -> Ok (Ok x, s) | Error e -> Ok (Error e, s)
 
 
 let lift (m : 'a Or_TypeError.t) : 'a m =

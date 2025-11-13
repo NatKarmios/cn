@@ -7,11 +7,11 @@ module Make (A : Args) = struct
 
   and 'a next = Next of 'a t A.next
 
-  and breakpoint = Breakpoint of unit next A.breakpoint
+  and breakpoint = Bp of unit next A.breakpoint
 
   let next n = Next n
 
-  let breakpoint b = Breakpoint b
+  let breakpoint b n = Breakpoint (Bp b, next n)
 
   let compute_next (Next n) = A.compute_next n
 
@@ -31,50 +31,22 @@ module Make (A : Args) = struct
 
   let map m f = bind m (fun x -> return (f x))
 
-  let rec flaky_fold'
-            ?prev
-            ~get_id
-            ~append
-            (f : 'b -> 'a -> 'b)
-            (acc : 'b)
-            (m : ('a, 'c) result t)
+  let rec flaky_fold (f : 'b -> 'a -> 'b) (acc : 'b) (m : ('a, 'c) result t)
     : ('b, 'c) result
     =
-    let id = get_id () in
-    Option.iter (fun p -> append (Format.sprintf "%d -> %d" p id)) prev;
     let rec aux acc = function
       | [] -> Ok acc
       | (_, n) :: rest ->
-        (match flaky_fold' ~prev:id ~get_id ~append f acc (compute_next n) with
+        (match flaky_fold f acc (compute_next n) with
          | Ok acc' -> aux acc' rest
          | Error e -> Error e)
     in
     match m with
-    | End (Ok x) ->
-      append (Format.sprintf "%d [label=\"%d (ok)\"]" id id);
-      Ok (f acc x)
-    | End (Error e) ->
-      append (Format.sprintf "%d [label=\"%d (error)\"]" id id);
-      Error e
-    | Vanish ->
-      append (Format.sprintf "%d [label=\"%d (vanish)\"]" id id);
-      Ok acc
-    | Breakpoint (_, n) -> flaky_fold' ~prev:id ~get_id ~append f acc (compute_next n)
-    | Choice cs ->
-      Format.printf "Folding choice!\n";
-      aux acc cs
-
-
-  let flaky_fold f acc m =
-    let count = ref 0 in
-    let get_id () =
-      let id = !count in
-      count := id + 1;
-      id
-    in
-    let append s = Format.printf "%s\n" s in
-    let r = flaky_fold' ~get_id ~append f acc m in
-    r
+    | End (Ok x) -> Ok (f acc x)
+    | End (Error e) -> Error e
+    | Vanish -> Ok acc
+    | Breakpoint (_, n) -> flaky_fold f acc (compute_next n)
+    | Choice cs -> aux acc cs
 
 
   let rec fold (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b =
@@ -151,7 +123,11 @@ module Make_memoized (A : Args) = struct
 
   include T
 
-  let next n = T.next (Memo.make A.compute_next n)
+  let next' n = Memo.make A.compute_next n
+
+  let next n = T.next (next' n)
+
+  let breakpoint b n = breakpoint b (next' n)
 
   let poll_next (Next n) = Memo.poll n
 end

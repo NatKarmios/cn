@@ -131,6 +131,50 @@ let there_can_only_be_one =
     filename
 
 
+let check_well_formedness
+      ~cc
+      ~filename
+      ~macros
+      ~permissive
+      ~incl_dirs
+      ~incl_files
+      ~astprints
+      ~no_inherit_loc
+      ~magic_comment_char_dollar
+      ~allow_split_magic_comments
+      ~save_cpp
+      ~disable_linemarkers
+      ~skip_label_inlining
+  =
+  let cabs_tunit, prog, (markers_env, ail_prog), statement_locs =
+    handle_frontend_error
+      (frontend
+         ~cc
+         ~macros
+         ~permissive
+         ~incl_dirs
+         ~incl_files
+         ~astprints
+         ~filename
+         ~magic_comment_char_dollar
+         ~allow_split_magic_comments
+         ~save_cpp
+         ~disable_linemarkers
+         ~skip_label_inlining)
+  in
+  let open Or_TypeError in
+  let@ prog5 =
+    Core_to_mucore.normalise_file
+      ~inherit_loc:(not no_inherit_loc)
+      (markers_env, snd ail_prog)
+      prog
+  in
+  let paused =
+    Typing.run_to_single_pause Context.empty (Check.check_decls_lemmata_fun_specs prog5)
+  in
+  Ok (cabs_tunit, prog5, ail_prog, statement_locs, paused)
+
+
 let with_well_formedness_check
       (* CLI arguments *)
       ~cc
@@ -191,7 +235,7 @@ let with_well_formedness_check
       in
       print_log_file ("mucore", `MUCORE prog5);
       let paused =
-        Typing.run_to_pause_single
+        Typing.run_to_single_pause
           Context.empty
           (Check.check_decls_lemmata_fun_specs prog5)
       in
