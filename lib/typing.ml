@@ -55,6 +55,8 @@ module Trace = struct
   end
 
   include T.Make_memoized (Args)
+
+  let display _ = failwith "TODO"
 end
 
 open T

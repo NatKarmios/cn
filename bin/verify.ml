@@ -328,8 +328,15 @@ let cmd =
 
 
 module Debug = struct
+  module Launch_command = struct
+    include Sedap_types.Launch_command
+
+    module Arguments = struct
+      type t = { filename : string } [@@deriving yojson { strict = false }]
+    end
+  end
+
   let verify_debug
-        filename
         cc
         macros
         permissive
@@ -379,40 +386,49 @@ module Debug = struct
     Resource.disable_resource_derived_constraints := disable_resource_derived_constraints;
     Prooflog.set_enabled false;
     Typing.unfold_multiclause_preds := not disable_unfold_multiclause_preds;
-    let filename = Common.there_can_only_be_one filename in
-    let wf_check =
-      Common.check_well_formedness
-        ~filename
-        ~cc
-        ~macros:(("__CN_VERIFY", None) :: macros)
-        ~permissive
-        ~incl_dirs
-        ~incl_files
-        ~astprints
-        ~no_inherit_loc
-        ~magic_comment_char_dollar
-        ~allow_split_magic_comments
-        ~save_cpp:None
-        ~disable_linemarkers:false
-        ~skip_label_inlining:false
+    let module Launch = struct
+      module Command = Launch_command
+
+      let launch ({ filename } : Launch_command.Arguments.t) =
+        let wf_check =
+          Common.check_well_formedness
+            ~filename
+            ~cc
+            ~macros:(("__CN_VERIFY", None) :: macros)
+            ~permissive
+            ~incl_dirs
+            ~incl_files
+            ~astprints
+            ~no_inherit_loc
+            ~magic_comment_char_dollar
+            ~allow_split_magic_comments
+            ~save_cpp:None
+            ~disable_linemarkers:false
+            ~skip_label_inlining:false
+        in
+        let paused =
+          match wf_check with Ok (_, _, _, _, p) -> p | Error _ -> failwith "help"
+        in
+        let check (functions, global_var_constraints, _) =
+          Check.time_check_c_functions
+            (skip, only)
+            check_consistency
+            (global_var_constraints, functions)
+        in
+        (* let trace = Typing.run_from_pause check paused in *)
+        let trace =
+          ignore (paused, check);
+          failwith "TODO"
+        in
+        Typing.Trace.display trace
+    end
     in
-    let paused =
-      match wf_check with Ok (_, _, _, _, p) -> p | Error _ -> failwith "help"
-    in
-    let check (functions, global_var_constraints, _) =
-      Check.time_check_c_functions
-        (skip, only)
-        check_consistency
-        (global_var_constraints, functions)
-    in
-    let trace = Typing.run_from_pause check paused in
-    ()
+    Debugger.Adapter.start (module Launch)
 
 
   let verify_debug_t : unit Term.t =
     let open Term in
     const verify_debug
-    $ Common.Flags.file
     $ Common.Flags.cc
     $ Common.Flags.macros
     $ Common.Flags.permissive

@@ -15,6 +15,8 @@ module Trace : sig
     Debugger.Trace.S
     with type 'nest breakpoint' := 'nest breakpoint'
      and type 'a next' := 'a next'
+
+  val display : (unit, TypeErrors.t) Result.t t -> bool Debugger.Display_trace.t
 end
 
 type failure = Context.t * Explain.log -> TypeErrors.t
