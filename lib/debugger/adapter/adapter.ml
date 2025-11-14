@@ -2,10 +2,11 @@ open Sedap_types
 open Util
 
 let run_debugger rpc launch =
+  let module Rpc = (val rpc : Rpc) in
   try%lwt
     let%lwt init_args, _caps, dbg = Init_phase.run rpc in
-    let cfg = { rpc; dbg; init_args; launch } in
-    Sedap_rpc.send_event rpc (module Initialized_event) ();%lwt
+    let cfg = make_cfg rpc init_args dbg launch in
+    Sedap_rpc.send_event Rpc.rpc (module Initialized_event) ();%lwt
     let%lwt () = Config_phase.run cfg in
     let%lwt _launch_args = Launch_phase.run cfg in
     let%lwt () = Debug_phase.run cfg in
@@ -14,19 +15,17 @@ let run_debugger rpc launch =
   | Exit -> Lwt.return_unit
 
 
-let start launch =
+let start launch_command launch =
+  let launch = make_launch launch_command launch in
   Lwt_main.run
   @@ try%lwt
-       let rpc =
-         let in_, out = Lwt_io.(stdin, stdout) in
-         Sedap_rpc.create ~in_ ~out ()
-       in
+       let module Rpc = (val make_rpc () : Rpc) in
        let cancel = ref (fun () -> ()) in
        Lwt.async (fun () ->
-         run_debugger rpc launch;%lwt
+         run_debugger (module Rpc) launch;%lwt
          !cancel ();
          Lwt.return_unit);
-       let loop = Sedap_rpc.start rpc in
+       let loop = Sedap_rpc.start Rpc.rpc in
        (cancel := fun () -> Lwt.cancel loop);
        let%lwt () = try%lwt loop with Lwt.Canceled -> Lwt.return_unit in
        Lwt.return ()

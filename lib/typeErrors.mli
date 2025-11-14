@@ -193,3 +193,5 @@ val report_json
   ?serialize_json:bool ->
   t ->
   unit
+
+val to_string_short : t -> string

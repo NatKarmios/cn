@@ -813,3 +813,8 @@ let report_json
       ]
   in
   Yojson.to_channel ~std:true stderr json
+
+
+let to_string_short e =
+  let report = pp_message e.msg in
+  Pp.plain report.short

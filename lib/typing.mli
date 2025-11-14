@@ -7,6 +7,7 @@ type 'a m = 'a t
 module Trace : sig
   type 'nest breakpoint' =
     | Log_entry of Explain.log_entry
+    | Msg of string
     | Nest of string * 'nest
 
   type 'a next'
@@ -16,7 +17,7 @@ module Trace : sig
     with type 'nest breakpoint' := 'nest breakpoint'
      and type 'a next' := 'a next'
 
-  val display : (unit, TypeErrors.t) Result.t t -> bool Debugger.Display_trace.t
+  val display : (unit, TypeErrors.t) Result.t t -> Debugger.Display_trace.t
 end
 
 type failure = Context.t * Explain.log -> TypeErrors.t
@@ -33,9 +34,9 @@ val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 
 val fail : failure -> 'a m
 
-val choice : 'a m list -> 'a m
+val choice : ?msg:string -> 'a m list -> 'a m
 
-val choose : 'a list -> 'a m
+val choose : ?msg:string -> 'a list -> 'a m
 
 val collect_pauses : ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
 

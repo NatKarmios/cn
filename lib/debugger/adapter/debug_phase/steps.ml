@@ -2,65 +2,53 @@ open Sedap_types
 open Util
 open Trace_debugger
 
-let handle_continue { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_continue (module Cfg : Cfg) =
+  Cfg.handle
     (module Continue_command)
     (fun _ ->
-       send_stopped_event rpc (continue dbg);%lwt
+       Cfg.send_stopped_event (continue Cfg.dbg);%lwt
        Lwt.return (Continue_command.Result.make ()))
 
 
-let handle_next { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
-    (module Next_command)
-    (fun _ -> send_stopped_event rpc (step_over dbg))
+let handle_next (module Cfg : Cfg) =
+  Cfg.handle (module Next_command) (fun _ -> Cfg.send_stopped_event (step_over Cfg.dbg))
 
 
-let handle_reverse_continue { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_reverse_continue (module Cfg : Cfg) =
+  Cfg.handle
     (module Reverse_continue_command)
-    (fun _ -> send_stopped_event rpc (continue_back dbg))
+    (fun _ -> Cfg.send_stopped_event (continue_back Cfg.dbg))
 
 
-let handle_step_back { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_step_back (module Cfg : Cfg) =
+  Cfg.handle
     (module Step_back_command)
-    (fun _ -> send_stopped_event rpc (step_back dbg))
+    (fun _ -> Cfg.send_stopped_event (step_back Cfg.dbg))
 
 
-let handle_step_in { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
-    (module Step_in_command)
-    (fun _ -> send_stopped_event rpc (step_in dbg))
+let handle_step_in (module Cfg : Cfg) =
+  Cfg.handle (module Step_in_command) (fun _ -> Cfg.send_stopped_event (step_in Cfg.dbg))
 
 
-let handle_step_out { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_step_out (module Cfg : Cfg) =
+  Cfg.handle
     (module Step_out_command)
-    (fun _ -> send_stopped_event rpc (step_out dbg))
+    (fun _ -> Cfg.send_stopped_event (step_out Cfg.dbg))
 
 
-let handle_jump { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_jump (module Cfg : Cfg) =
+  Cfg.handle
     (module Jump_command)
     (fun { step_id } ->
-       jump dbg step_id;
+       jump Cfg.dbg step_id;
        Lwt.return_unit)
 
 
-let handle_step_specific { rpc; dbg; _ } =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_step_specific (module Cfg : Cfg) =
+  Cfg.handle
     (module Step_specific_command)
     (fun { step_id; branch_case } ->
-       send_stopped_event rpc (step_specific dbg step_id branch_case))
+       Cfg.send_stopped_event (step_specific Cfg.dbg step_id branch_case))
 
 
 let handle cfg =

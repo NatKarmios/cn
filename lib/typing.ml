@@ -31,11 +31,14 @@ let empty_s (c : Context.t) =
 module Trace = struct
   type 'nest breakpoint' =
     | Log_entry of Explain.log_entry
+    | Msg of string
     | Nest of string * 'nest
 
   type 'a next' = s * (s -> 'a)
 
-  type case' = Case of int
+  type case' = int
+
+  let map_next' (s, n) f = (s, fun s' -> f (n s'))
 
   module Args = struct
     type 'a next = 'a next'
@@ -44,29 +47,66 @@ module Trace = struct
 
     type nonrec case = case'
 
-    let map_next (s, n) f = (s, fun s' -> f (n s'))
+    type nest_result = unit Or_TypeError.t
 
     let compute_next (s, n) =
       Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
       n s
 
 
+    let map_next = map_next'
+
     let get_nested = function Nest (_, nest) -> [ nest ] | _ -> []
   end
 
   include T.Make_memoized (Args)
 
-  let display _ = failwith "TODO"
+  open struct
+    module DT = Debugger.Display_trace
+    module Memo = Debugger.Memo
+  end
+
+  let rec display : unit Or_TypeError.t t -> DT.t = function
+    | End (Ok ()) -> End (Ok "Ok")
+    | End (Error e) -> End (Error (TypeErrors.to_string_short e))
+    | Vanish -> Vanish
+    | Breakpoint (b, n) ->
+      let b' = display_breakpoint b in
+      let n' = display_next n in
+      Breakpoint (b', n')
+    | Choice (b, cs) ->
+      let b' = display_breakpoint b in
+      let cs' = List.map (fun (i, n) -> (i, display_next n)) cs in
+      Choice (b', cs')
+
+
+  and display_next (n : unit Or_TypeError.t next) : DT.next =
+    let memo = next_to_memo n in
+    let memo' = Memo.map memo display in
+    DT.T.next_of_memo memo'
+
+
+  and display_breakpoint (Bp b) =
+    let msg, nest =
+      match b with
+      | Log_entry _ -> ("Log", [])
+      | Msg s -> (s, [])
+      | Nest (s, nest) ->
+        let nest' = [ display_next nest ] in
+        (s, nest')
+    in
+    let get_state () = failwith "TODO" in
+    DT.breakpoint ~msg ~nest ~get_state
 end
 
 open T
 open Trace
 
-type breakpoint = unit Trace.next Trace.breakpoint'
+type breakpoint = unit Or_TypeError.t Trace.next Trace.breakpoint'
 
-type 'a pause = ('a * s, TypeErrors.t) Result.t
+type 'a pause = ('a * s) Or_TypeError.t
 
-type 'a t = s -> ('a * s, TypeErrors.t) Result.t Trace.t
+type 'a t = s -> ('a * s) Or_TypeError.t Trace.t
 
 type 'a m = 'a t
 
@@ -112,24 +152,25 @@ let push_solver s =
 
 let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_ok ())
 
-let choice (cases : 'a t list) : 'a t =
+let choice ?(msg = "choice") (cases : 'a t list) : 'a t =
   fun s ->
-  let choices =
+  let b = Bp (Msg msg) in
+  let cs =
     cases
     |> List.mapi
        @@ fun i m ->
        let s' = with_new_solver_frame s in
-       (Case i, Trace.next (s', m))
+       (i, Trace.next (s', m))
   in
-  T.Choice choices
+  T.Choice (b, cs)
 
 
-let choose (cases : 'a list) : 'a t = choice (List.map return cases)
+let choose ?msg (cases : 'a list) : 'a t = choice ?msg (List.map return cases)
 
 let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
   fun s ->
   let sub = next (with_new_solver_frame s, m) in
-  let sub' = bind_next sub (fun _ -> End ()) in
+  let sub' = map_next sub Or_TypeError.unit in
   let b = Nest ("lol", sub') in
   let m' =
     fun s' ->
@@ -144,7 +185,7 @@ let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
   fun s ->
   let f = fun acc (x, _) -> f acc x in
   let sub = next (with_new_solver_frame s, m) in
-  let sub' = bind_next sub (fun _ -> End ()) in
+  let sub' = map_next sub Or_TypeError.unit in
   let b = Nest ("lol", sub') in
   let m' : 'b Or_TypeError.t t =
     fun s' ->

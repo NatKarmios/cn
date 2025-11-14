@@ -4,7 +4,7 @@ type stop_reason := Sedap_types.Stopped_event.Payload.Reason.t
 
 val make : unit -> t
 
-val launch : t -> bool Display_trace.t -> unit
+val launch : t -> Display_trace.t list -> unit
 
 val step_in : t -> stop_reason
 
@@ -31,5 +31,7 @@ val get_scopes : t -> Sedap_types.Scope.t list
 val get_variables : t -> int -> Sedap_types.Variable.t list
 
 val set_breakpoints : t -> Sedap_types.Source.t -> int list -> unit
+
+val get_map_update : t -> Sedap_types.Map_update_event_body.t
 
 val get_full_map : t -> Sedap_types.Map_update_event_body.t

@@ -3,7 +3,7 @@ module Types = struct
     | End of 'result
     | Vanish
     | Breakpoint of 'breakpoint * 'next
-    | Choice of ('choice_case * 'next) list
+    | Choice of 'breakpoint * ('choice_case * 'next) list
 end
 
 include Types
@@ -14,6 +14,8 @@ module type Args = sig
   type case
 
   type 'a next
+
+  type nest_result
 
   val map_next : 'a next -> ('a -> 'b) -> 'b next
 
@@ -31,15 +33,17 @@ module type S = sig
 
   type 'a next
 
-  type 'a t = ('a, breakpoint, case, 'a next) trace
+  type nest_result
 
-  and breakpoint = Bp of unit next breakpoint'
+  type breakpoint = Bp of nest_result next breakpoint'
+
+  type 'a t = ('a, breakpoint, case, 'a next) trace
 
   val compute_next : 'a next -> 'a t
 
   val next : 'a t next' -> 'a next
 
-  val breakpoint : unit next breakpoint' -> 'a t next' -> 'a t
+  val breakpoint : nest_result next breakpoint' -> 'a t next' -> 'a t
 
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 
@@ -48,6 +52,8 @@ module type S = sig
   val return : 'a -> 'a t
 
   val map : 'a t -> ('a -> 'b) -> 'b t
+
+  val map_next : 'a next -> ('a -> 'b) -> 'b next
 
   val fold : ('b -> 'a -> 'b) -> 'b -> 'a t -> 'b
 
@@ -64,6 +70,7 @@ module type Intf = sig
     with type 'n breakpoint' := 'n A.breakpoint
      and type case = A.case
      and type 'a next' := 'a A.next
+     and type nest_result = A.nest_result
 
   module Make_memoized (A : Args) : sig
     include
@@ -71,8 +78,13 @@ module type Intf = sig
       with type 'n breakpoint' := 'n A.breakpoint
        and type case = A.case
        and type 'a next' := 'a A.next
+       and type nest_result = A.nest_result
 
     val poll_next : 'a next -> 'a t option
+
+    val next_to_memo : 'a next -> 'a t Memo.t
+
+    val next_of_memo : 'a t Memo.t -> 'a next
   end
 
   type ('result, 'breakpoint, 'choice_case, 'next) trace =
@@ -80,5 +92,5 @@ module type Intf = sig
     | End of 'result
     | Vanish
     | Breakpoint of 'breakpoint * 'next
-    | Choice of ('choice_case * 'next) list
+    | Choice of 'breakpoint * ('choice_case * 'next) list
 end

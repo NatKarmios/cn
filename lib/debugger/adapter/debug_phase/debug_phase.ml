@@ -1,13 +1,11 @@
 open Sedap_types
 open Util
 
-let handle_disconnect { rpc; dbg; _ } resolver =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_disconnect (module Cfg : Cfg) resolver =
+  Cfg.handle_once
     (module Disconnect_command)
     (fun _ ->
-       Sedap_rpc.remove_command_handler rpc (module Disconnect_command);
-       Trace_debugger.terminate dbg;
+       Trace_debugger.terminate Cfg.dbg;
        Lwt.wakeup_later_exn resolver Exit;
        Lwt.return_unit)
 

@@ -1,25 +1,30 @@
 open Sedap_types
 open Util
 
-let handle_launch { rpc; dbg; launch; _ } resolver =
-  let module Launch = (val launch : Launch) in
-  Sedap_rpc.set_command_handler
-    rpc
-    (module Launch.Command)
+let handle_launch (module Cfg : Cfg) resolver =
+  let module Cmd :
+    COMMAND
+    with type Arguments.t = Cfg.Launch_command.Arguments.t
+     and type Result.t = Cfg.Launch_command.Result.t =
+    Cfg.Launch_command
+  in
+  Cfg.handle_once
+    (module Cmd)
     (fun launch_args ->
-       Sedap_rpc.remove_command_handler rpc (module Launch.Command);
-       let trace = Launch.launch launch_args in
-       Trace_debugger.launch dbg trace;
-       Lwt.wakeup_later resolver ();
-       Lwt.return_unit)
+       match Cfg.launch launch_args with
+       | Ok traces ->
+         Trace_debugger.launch Cfg.dbg traces;
+         Lwt.wakeup_later resolver ();
+         Lwt.return_unit
+       | Error e ->
+         Lwt.wakeup_later_exn resolver Exit;
+         Lwt.fail_with e)
 
 
-let handle_disconnect { rpc; _ } resolver =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_disconnect (module Cfg : Cfg) resolver =
+  Cfg.handle_once
     (module Disconnect_command)
     (fun _ ->
-       Sedap_rpc.remove_command_handler rpc (module Disconnect_command);
        Lwt.wakeup_later_exn resolver Exit;
        Lwt.return_unit)
 

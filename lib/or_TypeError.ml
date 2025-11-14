@@ -10,4 +10,11 @@ let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
   match m with Ok a -> f a | Error e -> Error e
 
 
+let unit = function Ok _ -> Ok () | Error e -> Error e
+
+let to_string_error = function
+  | Ok x -> Ok x
+  | Error e -> Error (TypeErrors.to_string_short e)
+
+
 let ( let@ ) = bind

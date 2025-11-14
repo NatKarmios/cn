@@ -1,11 +1,10 @@
 open Sedap_types
+open Util
 
-let handle_initialize rpc resolver =
-  Debug_rpc.set_command_handler
-    rpc
+let handle_initialize (module Rpc : Rpc) resolver =
+  Rpc.handle_once
     (module Initialize_command)
     (fun init_args ->
-       Sedap_rpc.remove_command_handler rpc (module Initialize_command);
        let caps =
          Capabilities.make
            ~supports_configuration_done_request:(Some true)
@@ -17,21 +16,16 @@ let handle_initialize rpc resolver =
        Lwt.return caps)
 
 
-let handle_attach rpc =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_attach (module Rpc : Rpc) =
+  Rpc.handle_once
     (module Attach_command)
-    (fun _ ->
-       Sedap_rpc.remove_command_handler rpc (module Attach_command);
-       Lwt.fail_with "Attach request is unsupported")
+    (fun _ -> Lwt.fail_with "Attach request is unsupported")
 
 
-let handle_disconnect rpc resolver =
-  Sedap_rpc.set_command_handler
-    rpc
+let handle_disconnect (module Rpc : Rpc) resolver =
+  Rpc.handle_once
     (module Disconnect_command)
     (fun _ ->
-       Sedap_rpc.remove_command_handler rpc (module Disconnect_command);
        Lwt.wakeup_later_exn resolver Exit;
        Lwt.return_unit)
 

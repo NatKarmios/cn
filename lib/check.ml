@@ -2982,6 +2982,43 @@ let check_decls_lemmata_fun_specs (file : unit Mu.file) =
   return (List.rev checked, global_var_constraints, lemmata)
 
 
+let init_check check_consistency global_var_constraints checked =
+  let@ () = init_solver () in
+  let here = Locations.other __LOC__ in
+  let@ () = add_cs here global_var_constraints in
+  let@ global = get_global () in
+  match check_consistency with
+  | true ->
+    let@ () =
+      Sym.Map.fold
+        (fun _ def acc ->
+           (* I think this avoids a left-recursion in the monad bind *)
+           let@ () = Consistent.predicate def in
+           acc)
+        global.resource_predicates
+        (return ())
+    in
+    let@ () =
+      Sym.Map.fold
+        (fun _ (loc, def, _) acc ->
+           match def with
+           | None -> acc
+           | Some def ->
+             (* I think this avoids a left-recursion in the monad bind *)
+             let@ () = Consistent.function_type "proc/fun" loc def in
+             acc)
+        global.fun_decls
+        (return ())
+    in
+    let@ () =
+      ListM.iterM
+        (fun (_, (loc, args_and_body)) -> Consistent.procedure loc args_and_body)
+        checked
+    in
+    return ()
+  | false -> return ()
+
+
 (** With CSV timing enabled, check the provided functions with
     [check_c_functions]. See that function for more information on the
     semantics of checking. *)
@@ -2992,42 +3029,7 @@ let time_check_c_functions
   : (string * TypeErrors.t) list m
   =
   Cerb_debug.begin_csv_timing () (*type checking functions*);
-  let@ () = init_solver () in
-  let here = Locations.other __LOC__ in
-  let@ () = add_cs here global_var_constraints in
-  let@ global = get_global () in
-  let@ () =
-    match check_consistency with
-    | true ->
-      let@ () =
-        Sym.Map.fold
-          (fun _ def acc ->
-             (* I think this avoids a left-recursion in the monad bind *)
-             let@ () = Consistent.predicate def in
-             acc)
-          global.resource_predicates
-          (return ())
-      in
-      let@ () =
-        Sym.Map.fold
-          (fun _ (loc, def, _) acc ->
-             match def with
-             | None -> acc
-             | Some def ->
-               (* I think this avoids a left-recursion in the monad bind *)
-               let@ () = Consistent.function_type "proc/fun" loc def in
-               acc)
-          global.fun_decls
-          (return ())
-      in
-      let@ () =
-        ListM.iterM
-          (fun (_, (loc, args_and_body)) -> Consistent.procedure loc args_and_body)
-          checked
-      in
-      return ()
-    | false -> return ()
-  in
+  let@ () = init_check check_consistency global_var_constraints checked in
   let@ errors = check_c_functions skip_and_only checked in
   Cerb_debug.end_csv_timing "type checking functions";
   return errors
@@ -3048,6 +3050,22 @@ let generate_lemmas lemmata o_lemma_mode =
     in
     lift (Lemmata.generate global mode lemmata)
   | None -> return ()
+
+
+let trace_check_c_functions
+      skip_and_only
+      check_consistency
+      (global_var_constraints, (checked : c_function list))
+  : unit m list m
+  =
+  let@ () = init_check check_consistency global_var_constraints checked in
+  let selected_fsyms =
+    select_functions skip_and_only (Sym.Set.of_list (List.map fst checked))
+  in
+  let selected_funs =
+    List.filter (fun (fsym, _) -> Sym.Set.mem fsym selected_fsyms) checked
+  in
+  return (List.map check_c_function selected_funs)
 
 (* TODO:
    - sequencing strength
