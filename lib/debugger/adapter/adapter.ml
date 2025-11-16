@@ -1,13 +1,14 @@
 open Sedap_types
 open Util
+open Log
 
 let run_debugger rpc launch =
   let module Rpc = (val rpc : Rpc) in
   try%lwt
+    log_to_file "run_debugger";
     let%lwt init_args, _caps, dbg = Init_phase.run rpc in
     let cfg = make_cfg rpc init_args dbg launch in
-    Sedap_rpc.send_event Rpc.rpc (module Initialized_event) ();%lwt
-    let%lwt () = Config_phase.run cfg in
+    Rpc.send (module Initialized_event) ();%lwt
     let%lwt _launch_args = Launch_phase.run cfg in
     let%lwt () = Debug_phase.run cfg in
     Lwt.return_unit
@@ -16,6 +17,8 @@ let run_debugger rpc launch =
 
 
 let start launch_command launch =
+  reset_log_file ();
+  log_to_file "Started";
   let launch = make_launch launch_command launch in
   Lwt_main.run
   @@ try%lwt

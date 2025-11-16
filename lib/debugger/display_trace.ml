@@ -6,10 +6,23 @@ module Variable = struct
       children : t list
     }
 
-  type ts = (string * t) list
+  type ts = (string * t list) list
 end
 
-type state = { vars : Variable.ts }
+type stack_frame =
+  { index : int;
+    name : string;
+    source : string option;
+    start_line : int;
+    start_column : int;
+    end_line : int option;
+    end_column : int option
+  }
+
+type state =
+  { vars : Variable.ts;
+    frames : stack_frame list
+  }
 
 type 'nest breakpoint =
   { msg : string;

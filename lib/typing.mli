@@ -5,10 +5,12 @@ type 'a t
 type 'a m = 'a t
 
 module Trace : sig
-  type 'nest breakpoint' =
+  type 'nest breakpoint'' =
     | Log_entry of Explain.log_entry
     | Msg of string
     | Nest of string * 'nest
+
+  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
 
   type 'a next'
 
@@ -33,6 +35,8 @@ val pure : 'a m -> 'a m
 val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 
 val fail : failure -> 'a m
+
+val set_backup_loc : Cerb_location.t -> unit m
 
 val choice : ?msg:string -> 'a m list -> 'a m
 

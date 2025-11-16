@@ -52,4 +52,6 @@ val start_pos : t -> Cerb_position.t option
 
 val end_pos : t -> Cerb_position.t option
 
+val end_pos' : t -> Cerb_position.t option
+
 val get_region : t -> (Cerb_position.t * Cerb_position.t * Cerb_location.cursor) option

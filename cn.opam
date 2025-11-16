@@ -28,7 +28,7 @@ depends: [
 ]
 pin-depends: [
   ["cerberus-lib.dev" "git+https://github.com/rems-project/cerberus.git#9eb2ce2"]
-  ["sedap.~dev" "git+https://github.com/GillianPlatform/ocaml-sedap#1255830f659a806639468d143ed0e4fa39becfa0"]
+  ["sedap.~dev" "git+https://github.com/GillianPlatform/ocaml-sedap#148753869537fac4f543d19cfd5e57025ed5e3e3"]
 ]
 build: [
   ["dune" "subst"] {pinned}

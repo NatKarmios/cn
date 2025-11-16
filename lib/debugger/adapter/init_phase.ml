@@ -1,5 +1,6 @@
 open Sedap_types
 open Util
+open Log
 
 let handle_initialize (module Rpc : Rpc) resolver =
   Rpc.handle_once
@@ -32,6 +33,7 @@ let handle_disconnect (module Rpc : Rpc) resolver =
 
 (** Handles debug adapter initialization once the "initialize" command is received. *)
 let run rpc =
+  log_to_file "init phase";
   let promise, resolver = Lwt.task () in
   handle_initialize rpc resolver;
   handle_attach rpc;

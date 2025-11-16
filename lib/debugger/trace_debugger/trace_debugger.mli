@@ -4,7 +4,7 @@ type stop_reason := Sedap_types.Stopped_event.Payload.Reason.t
 
 val make : unit -> t
 
-val launch : t -> Display_trace.t list -> unit
+val launch : t -> (string * Display_trace.t) list -> unit
 
 val step_in : t -> stop_reason
 
@@ -17,8 +17,6 @@ val step_back : t -> stop_reason
 val continue : t -> stop_reason
 
 val continue_back : t -> stop_reason
-
-val step_specific : t -> string -> Sedap_types.Branch_case.t option -> stop_reason
 
 val jump : t -> string -> unit
 

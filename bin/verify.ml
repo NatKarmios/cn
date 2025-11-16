@@ -334,7 +334,7 @@ module Debug = struct
     include Sedap_types.Launch_command
 
     module Arguments = struct
-      type t = { filename : string } [@@deriving yojson { strict = false }]
+      type t = { program : string } [@@deriving yojson { strict = false }]
     end
   end
 
@@ -390,7 +390,7 @@ module Debug = struct
     Resource.disable_resource_derived_constraints := disable_resource_derived_constraints;
     Prooflog.set_enabled false;
     Typing.unfold_multiclause_preds := not disable_unfold_multiclause_preds;
-    let launch ({ filename } : Launch_command.Arguments.t) =
+    let launch ({ program = filename } : Launch_command.Arguments.t) =
       let wf_check =
         Common.check_well_formedness
           ~filename
@@ -421,11 +421,13 @@ module Debug = struct
         |> Or_TypeError.to_string_error
       in
       let traces =
-        List.map
-          (fun check -> Typing.run_from_pause (fun _ -> pure check) checks_pause)
+        List.map_snd
+          (fun check ->
+             let trace = Typing.run_from_pause (fun _ -> pure check) checks_pause in
+             Typing.Trace.display trace)
           checks
       in
-      Ok (List.map Typing.Trace.display traces)
+      Ok traces
     in
     Debugger.Adapter.start (module Launch_command) launch
 

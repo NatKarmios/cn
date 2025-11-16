@@ -11,12 +11,17 @@ type solver = Solver.solver
 
 type solver_frame = Solver.solver_frame
 
+let coalesce a b = match a with Some _ -> a | _ -> b
+
+let loc_of_where (w : Where.t) = coalesce w.expression w.statement
+
 type s =
   { typing_context : Context.t;
     solver : (solver * solver_frame) option;
     sym_eqs : IT.t Sym.Map.t;
     movable_indices : (Req.name * IT.t) list;
-    log : Explain.log
+    log : Explain.log;
+    backup_loc : Cerb_location.t option
   }
 
 let empty_s (c : Context.t) =
@@ -24,15 +29,23 @@ let empty_s (c : Context.t) =
     solver = None;
     sym_eqs = Sym.Map.empty;
     movable_indices = [];
-    log = []
+    log = [];
+    backup_loc = loc_of_where c.where
   }
 
 
 module Trace = struct
-  type 'nest breakpoint' =
+  module DT = Debugger.Display_trace
+  module Memo = Debugger.Memo
+  open Context
+  open Pp
+
+  type 'nest breakpoint'' =
     | Log_entry of Explain.log_entry
     | Msg of string
     | Nest of string * 'nest
+
+  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
 
   type 'a next' = s * (s -> 'a)
 
@@ -56,15 +69,83 @@ module Trace = struct
 
     let map_next = map_next'
 
-    let get_nested = function Nest (_, nest) -> [ nest ] | _ -> []
+    let get_nested = function _, Nest (_, nest) -> [ nest ] | _ -> []
   end
 
   include T.Make_memoized (Args)
 
-  open struct
-    module DT = Debugger.Display_trace
-    module Memo = Debugger.Memo
-  end
+  let make_variable ?(name = "") ?type_ ?(children = []) ?(value = "") () =
+    DT.Variable.{ name; value; type_; children }
+
+
+  let display_sym_mapping ((sym, (bv, _)) : Sym.t * (Context.basetype_or_value * 'a))
+    : DT.Variable.t
+    =
+    let name = Pp.plain (Sym.pp sym) in
+    let value = Pp.plain (Context.pp_basetype_or_value bv) in
+    make_variable ~name ~value ()
+
+
+  let display_sym_map (map : (Context.basetype_or_value * 'a) Sym.Map.t)
+    : DT.Variable.t list
+    =
+    map |> Sym.Map.to_seq |> Seq.map display_sym_mapping |> List.of_seq
+
+
+  let display_resource (r : Res.t) : DT.Variable.t =
+    let value = Pp.plain (Resource.pp r) in
+    make_variable ~value ()
+
+
+  let display_constraint (lc : LC.t) : DT.Variable.t =
+    let name, value =
+      match lc with
+      | LC.T it -> ("", Pp.plain (IT.pp it))
+      | LC.Forall ((s, bt), it) ->
+        (Pp.plain (Pp.c_app !^"forall" [ Sym.pp s; BaseTypes.pp bt ]), Pp.plain (IT.pp it))
+    in
+    make_variable ~name ~value ()
+
+
+  let display_constraints (lcs : LC.Set.t) : DT.Variable.t list =
+    lcs |> LC.Set.to_seq |> Seq.map display_constraint |> List.of_seq
+
+
+  let make_stack_frame (w : Where.t) (backup_loc : Cerb_location.t option)
+    : DT.stack_frame option
+    =
+    let ( let* ) = Option.bind in
+    let* loc = coalesce (loc_of_where w) backup_loc in
+    let* start_pos = Locations.start_pos loc in
+    let start_line = Cerb_position.line start_pos in
+    let start_column = Cerb_position.column start_pos in
+    let source = Some (Cerb_position.file start_pos) in
+    let end_pos = Locations.end_pos' loc in
+    let end_line = Option.map Cerb_position.line end_pos in
+    let end_column = Option.map Cerb_position.column end_pos in
+    Some
+      DT.
+        { index = 0;
+          name = "TODO stack frame name";
+          source;
+          start_line;
+          start_column;
+          end_line;
+          end_column
+        }
+
+
+  let display_context ((c, l) : Context.t * Cerb_location.t option) : DT.state =
+    let vars : DT.Variable.ts =
+      [ ("Computational", display_sym_map c.computational);
+        ("Logical", display_sym_map c.logical);
+        ("Resources", List.map display_resource c.resources);
+        ("Constraints", display_constraints c.constraints)
+      ]
+    in
+    let frames = match make_stack_frame c.where l with Some f -> [ f ] | None -> [] in
+    { vars; frames }
+
 
   let rec display : unit Or_TypeError.t t -> DT.t = function
     | End (Ok ()) -> End (Ok "Ok")
@@ -86,7 +167,7 @@ module Trace = struct
     DT.T.next_of_memo memo'
 
 
-  and display_breakpoint (Bp b) =
+  and display_breakpoint (Bp (c, b)) =
     let msg, nest =
       match b with
       | Log_entry _ -> ("Log", [])
@@ -95,7 +176,8 @@ module Trace = struct
         let nest' = [ display_next nest ] in
         (s, nest')
     in
-    let get_state () = failwith "TODO" in
+    let state = lazy (display_context c) in
+    let get_state () = Lazy.force state in
     DT.breakpoint ~msg ~nest ~get_state
 end
 
@@ -154,7 +236,7 @@ let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_o
 
 let choice ?(msg = "choice") (cases : 'a t list) : 'a t =
   fun s ->
-  let b = Bp (Msg msg) in
+  let b = Bp ((s.typing_context, s.backup_loc), Msg msg) in
   let cs =
     cases
     |> List.mapi
@@ -171,7 +253,7 @@ let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
   fun s ->
   let sub = next (with_new_solver_frame s, m) in
   let sub' = map_next sub Or_TypeError.unit in
-  let b = Nest ("lol", sub') in
+  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
   let m' =
     fun s' ->
     let t = compute_next sub in
@@ -186,7 +268,7 @@ let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
   let f = fun acc (x, _) -> f acc x in
   let sub = next (with_new_solver_frame s, m) in
   let sub' = map_next sub Or_TypeError.unit in
-  let b = Nest ("lol", sub') in
+  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
   let m' : 'b Or_TypeError.t t =
     fun s' ->
     let t = compute_next sub in
@@ -202,6 +284,10 @@ let get () : s t = fun s -> end_ok s s
 
 (* due to solver interaction, this has to be used carefully *)
 let set (s' : s) : unit t = fun _s -> end_ok () s'
+
+let set_backup_loc (loc : Cerb_location.t) : unit t =
+  fun s -> end_ok () { s with backup_loc = Some loc }
+
 
 let fold_unit (t : 'a pause Trace.t) : unit Or_TypeError.t =
   let f () _ = () in
@@ -323,7 +409,7 @@ let modify' (f : s -> s * Explain.log_entry option) : unit t =
   let m = set s' in
   match log with
   | Some log ->
-    let@ () = breakpoint (Log_entry log) in
+    let@ () = breakpoint ((s.typing_context, s.backup_loc), Log_entry log) in
     m
   | None -> m
 

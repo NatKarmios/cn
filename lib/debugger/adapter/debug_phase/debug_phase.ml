@@ -1,5 +1,6 @@
 open Sedap_types
 open Util
+open Log
 
 let handle_disconnect (module Cfg : Cfg) resolver =
   Cfg.handle_once
@@ -11,6 +12,7 @@ let handle_disconnect (module Cfg : Cfg) resolver =
 
 
 let run cfg =
+  log_to_file "debug phase";
   let promise, resolver = Lwt.task () in
   handle_disconnect cfg resolver;
   Inspect.handle cfg;

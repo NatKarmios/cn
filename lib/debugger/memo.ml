@@ -44,3 +44,6 @@ let make (f : 'a -> 'b) (x : 'a) : 'b t =
   let poll () = !r in
   let force () = match !r with None -> f x | Some y -> y in
   ref (Pending { poll; force })
+
+
+let make' (x : 'a) : 'a t = ref (Computed x)

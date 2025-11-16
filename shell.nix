@@ -8,6 +8,6 @@ pkgs.mkShell {
     gmp
     z3
     cvc5
-    (pkgs.writeShellScriptBin "cn_" "dune exec -p cn --profile=dev -- cn $@")
+    (pkgs.writeShellScriptBin "cn_" "opam exec -- dune exec -p cn --profile=dev -- cn $@")
   ];
 }

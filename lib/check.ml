@@ -2724,6 +2724,7 @@ let select_functions (skip_and_only : string list * string list) (fsyms : Sym.Se
 
 (** Check a single C function. Failure of the check is encoded monadically. *)
 let check_c_function ((fsym, (loc, args_and_body)) : c_function) : unit m =
+  let@ () = set_backup_loc loc in
   check_procedure loc fsym args_and_body
 
 
@@ -3056,7 +3057,7 @@ let trace_check_c_functions
       skip_and_only
       check_consistency
       (global_var_constraints, (checked : c_function list))
-  : unit m list m
+  : (string * unit m) list m
   =
   let@ () = init_check check_consistency global_var_constraints checked in
   let selected_fsyms =
@@ -3065,7 +3066,10 @@ let trace_check_c_functions
   let selected_funs =
     List.filter (fun (fsym, _) -> Sym.Set.mem fsym selected_fsyms) checked
   in
-  return (List.map check_c_function selected_funs)
+  return
+    (List.map
+       (fun c_fun -> (c_function_name c_fun, check_c_function c_fun))
+       selected_funs)
 
 (* TODO:
    - sequencing strength

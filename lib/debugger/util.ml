@@ -1,11 +1,20 @@
 open Sedap_types
+open Log
 
 type stop_reason = Stopped_event.Payload.Reason.t
 
-let send_stopped_event rpc ?(thread_id = Some 0) reason =
-  let payload = Stopped_event.Payload.(make ~reason ~thread_id ()) in
-  Sedap_rpc.send_event rpc (module Stopped_event) payload
+module type T = sig
+  val type_ : string
+end
 
+let get_command_type_
+      (type a b)
+      (module C : COMMAND with type Arguments.t = a and type Result.t = b)
+  =
+  C.type_
+
+
+let get_event_type_ (type a) (module E : EVENT with type Payload.t = a) = E.type_
 
 module type Rpc = sig
   val rpc : Sedap_rpc.t
@@ -22,7 +31,9 @@ module type Rpc = sig
     ('a -> 'b Lwt.t) ->
     unit
 
-  val send_stopped_event : ?thread_id:int option -> stop_reason -> unit Lwt.t
+  val send : (module EVENT with type Payload.t = 'a) -> 'a -> unit Lwt.t
+
+  val send_stopped : ?thread_id:int option -> stop_reason -> unit Lwt.t
 end
 
 let make_rpc () : (module Rpc) =
@@ -32,7 +43,18 @@ let make_rpc () : (module Rpc) =
       Sedap_rpc.create ~in_ ~out ()
 
 
-    let handle cmd f = Sedap_rpc.set_command_handler rpc cmd f
+    let handle cmd f =
+      let type_ = get_command_type_ cmd in
+      Sedap_rpc.set_command_handler rpc cmd (fun x ->
+        log_to_file ("handling " ^ type_);
+        try%lwt f x with
+        | exc ->
+          let bt = Printexc.get_raw_backtrace () in
+          let exc' = Printexc.to_string exc in
+          let bt' = Printexc.raw_backtrace_to_string bt in
+          log_to_file (bt' ^ "\n" ^ exc');
+          Printexc.raise_with_backtrace exc bt)
+
 
     let unhandle cmd = Sedap_rpc.remove_command_handler rpc cmd
 
@@ -45,7 +67,14 @@ let make_rpc () : (module Rpc) =
         f x)
 
 
-    let send_stopped_event = send_stopped_event rpc
+    let send ev p =
+      log_to_file ("sending " ^ get_event_type_ ev);
+      Sedap_rpc.send_event rpc ev p
+
+
+    let send_stopped ?(thread_id = Some 0) reason =
+      let payload = Stopped_event.Payload.(make ~reason ~thread_id ()) in
+      send (module Stopped_event) payload
   end)
 
 
@@ -54,7 +83,9 @@ module type Launch_command = COMMAND with type Result.t = Launch_command.Result.
 module type Launch = sig
   module Launch_command : Launch_command
 
-  val launch : Launch_command.Arguments.t -> (Display_trace.t list, string) result
+  type traces := ((string * Display_trace.t) list, string) result
+
+  val launch : Launch_command.Arguments.t -> traces
 end
 
 let make_launch
@@ -87,6 +118,11 @@ let make_cfg (module Rpc : Rpc) init_args dbg (module Launch : Launch) : (module
     let init_args = init_args
 
     let dbg = dbg
+
+    let send_stopped ?thread_id reason =
+      Rpc.send_stopped ?thread_id reason;%lwt
+      Rpc.send (module Map_update_event) (Trace_debugger.get_map_update dbg)
+
 
     include Launch
   end)

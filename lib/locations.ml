@@ -88,6 +88,14 @@ let end_pos = function
   | _ -> None
 
 
+let end_pos' = function
+  | Cerb_location.Loc_region (_, loc, _) -> Some loc
+  | Loc_regions (list, _) ->
+    (* can't use Option module without a cyclic dependency? *)
+    (match List.last list with None -> None | Some (_, loc) -> Some loc)
+  | _ -> None
+
+
 let get_region = function
   | Cerb_location.Loc_region (start, end_, cursor) -> Some (start, end_, cursor)
   | _ -> None
