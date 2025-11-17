@@ -6,7 +6,6 @@ type 'a m = 'a t
 
 module Trace : sig
   type 'nest breakpoint'' =
-    | Log_entry of Explain.log_entry
     | Msg of string
     | Nest of string * 'nest
 
@@ -38,9 +37,9 @@ val fail : failure -> 'a m
 
 val set_backup_loc : Cerb_location.t -> unit m
 
-val choice : ?msg:string -> 'a m list -> 'a m
+val choice : ?msg:string -> (string * 'a m) list -> 'a m
 
-val choose : ?msg:string -> 'a list -> 'a m
+val choose : ?msg:string -> (string * 'a) list -> 'a m
 
 val collect_pauses : ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
 

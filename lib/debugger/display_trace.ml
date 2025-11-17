@@ -35,7 +35,7 @@ type t' = (string, string) Result.t
 module T = Trace.Make_memoized (struct
     type nonrec 'nest breakpoint = 'nest breakpoint
 
-    type case = int
+    type case = string
 
     type 'a next = unit -> 'a
 

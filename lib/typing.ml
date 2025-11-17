@@ -13,7 +13,77 @@ type solver_frame = Solver.solver_frame
 
 let coalesce a b = match a with Some _ -> a | _ -> b
 
-let loc_of_where (w : Where.t) = coalesce w.expression w.statement
+let loc_of_where (w : Where.t) =
+  let ( let/ ) o f = match o with Some _ -> o | _ -> f () in
+  let/ () = w.expression in
+  let/ () = w.statement in
+  let/ () = match w.section with Some (Label { loc; _ }) -> Some loc | _ -> None in
+  let open Cerb_frontend.Symbol in
+  match w.fnction with
+  | Some (Symbol (_, _, sd)) ->
+    (match sd with SD_unnamed_tag loc | SD_FunArg (loc, _) -> Some loc | _ -> None)
+  | None -> None
+
+
+let cap start str = min (max 0 start) (String.length str)
+
+let get_source_in_where (w : Where.t) : string option =
+  let ( let* ) = Option.bind in
+  let* loc = loc_of_where w in
+  let* start_pos = Locations.start_pos loc in
+  let source = Cerb_position.file start_pos in
+  let start_line = Cerb_position.line start_pos - 1 in
+  let start_char = Cerb_position.column start_pos - 1 in
+  let end_pos = Locations.end_pos' loc in
+  let ic = open_in source in
+  try
+    Fun.protect ~finally:(fun () -> close_in ic)
+    @@ fun () ->
+    for _ = 0 to start_line - 1 do
+      ignore (input_line ic)
+    done;
+    match end_pos with
+    | None ->
+      (* Read to end of line *)
+      let line = input_line ic in
+      let start_char = cap start_char line in
+      (* let s = String.sub line start_char (String.length line - start_char) in *)
+      let s = String.sub line start_char 1 in
+      Debugger.Log.log_to_file ("smol: " ^ s);
+      Some s
+    | Some end_pos ->
+      let end_line = Cerb_position.line end_pos - 1 in
+      let end_char = Cerb_position.column end_pos - 1 in
+      if end_line = start_line then (
+        let line = input_line ic in
+        let start_char = cap start_char line in
+        let end_char = cap end_char line in
+        let s = String.sub line start_char (end_char - start_char) in
+        Some s)
+      else (
+        let buffer = Buffer.create 1024 in
+        for current_line = start_line to end_line do
+          let line = input_line ic in
+          if current_line = start_line then (
+            Debugger.Log.log_to_file "start";
+            let start_char = cap start_char line in
+            let len = String.length line - start_char in
+            Buffer.add_substring buffer line start_char len)
+          else if current_line = end_line then (
+            Debugger.Log.log_to_file "end";
+            let len = cap end_char line in
+            Buffer.add_substring buffer line 0 len)
+          else (
+            Debugger.Log.log_to_file "mid";
+            Buffer.add_string buffer line);
+          Buffer.add_char buffer '\n'
+        done;
+        let s = Buffer.contents buffer in
+        Debugger.Log.log_to_file ("big: " ^ s);
+        Some s)
+  with
+  | End_of_file -> None
+
 
 type s =
   { typing_context : Context.t;
@@ -38,10 +108,9 @@ module Trace = struct
   module DT = Debugger.Display_trace
   module Memo = Debugger.Memo
   open Context
-  open Pp
+  open Pp.Infix
 
   type 'nest breakpoint'' =
-    | Log_entry of Explain.log_entry
     | Msg of string
     | Nest of string * 'nest
 
@@ -49,7 +118,7 @@ module Trace = struct
 
   type 'a next' = s * (s -> 'a)
 
-  type case' = int
+  type case' = string
 
   let map_next' (s, n) f = (s, fun s' -> f (n s'))
 
@@ -119,7 +188,8 @@ module Trace = struct
     let* start_pos = Locations.start_pos loc in
     let start_line = Cerb_position.line start_pos in
     let start_column = Cerb_position.column start_pos in
-    let source = Some (Cerb_position.file start_pos) in
+    let source = Cerb_position.file start_pos in
+    let source = Some source in
     let end_pos = Locations.end_pos' loc in
     let end_line = Option.map Cerb_position.line end_pos in
     let end_column = Option.map Cerb_position.column end_pos in
@@ -170,7 +240,6 @@ module Trace = struct
   and display_breakpoint (Bp (c, b)) =
     let msg, nest =
       match b with
-      | Log_entry _ -> ("Log", [])
       | Msg s -> (s, [])
       | Nest (s, nest) ->
         let nest' = [ display_next nest ] in
@@ -234,20 +303,22 @@ let push_solver s =
 
 let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_ok ())
 
-let choice ?(msg = "choice") (cases : 'a t list) : 'a t =
+let choice ?(msg = "choice") (cases : (string * 'a t) list) : 'a t =
   fun s ->
   let b = Bp ((s.typing_context, s.backup_loc), Msg msg) in
   let cs =
     cases
-    |> List.mapi
-       @@ fun i m ->
+    |> List.map
+       @@ fun (label, m) ->
        let s' = with_new_solver_frame s in
-       (i, Trace.next (s', m))
+       (label, Trace.next (s', m))
   in
   T.Choice (b, cs)
 
 
-let choose ?msg (cases : 'a list) : 'a t = choice ?msg (List.map return cases)
+let choose ?msg (cases : (string * 'a) list) : 'a t =
+  choice ?msg (List.map_snd return cases)
+
 
 let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
   fun s ->
@@ -403,13 +474,13 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify' (f : s -> s * Explain.log_entry option) : unit t =
+let modify' (f : s -> s * string option) : unit t =
   let@ s = get () in
   let s', log = f s in
   let m = set s' in
   match log with
-  | Some log ->
-    let@ () = breakpoint ((s.typing_context, s.backup_loc), Log_entry log) in
+  | Some msg ->
+    let@ () = breakpoint ((s'.typing_context, s'.backup_loc), Msg msg) in
     m
   | None -> m
 
@@ -444,10 +515,27 @@ let set_global (g : Global.t) : unit t =
   modify_typing_context (fun s -> { s with global = g })
 
 
+let show_action a =
+  let open Explain in
+  let open Pp in
+  let open Pp.Infix in
+  let doc : PPrint.document =
+    match a with
+    | Read (ptr, v) -> IT.pp v ^^ !^" = *" ^^ IT.pp ptr
+    | Write (ptr, v) -> !^"*" ^^ IT.pp ptr ^^ !^" = " ^^ IT.pp v
+    | Create a -> !^"Create " ^^ IT.pp a
+    | Kill a -> !^"Kill " ^^ IT.pp a
+    | Call { fsym; args; _ } -> Sym.pp fsym ^^ !^"(" ^^ list IT.pp args ^^ !^")"
+    | Return { arg; _ } -> !^"Return " ^^ IT.pp arg
+  in
+  Pp.plain doc
+
+
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
   modify' (fun s ->
     let log_entry = Explain.Action (a, loc) in
-    ({ s with log = log_entry :: s.log }, Some log_entry))
+    let b = Some ("<" ^ show_action a ^ ">") in
+    ({ s with log = log_entry :: s.log }, b))
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
@@ -455,7 +543,8 @@ let modify_where (f : Where.t -> Where.t) : unit t =
     let log_entry = Explain.State s.typing_context in
     let log = log_entry :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
-    ({ s with log; typing_context }, Some log_entry))
+    let msg = Option.value ~default:"?" (get_source_in_where typing_context.where) in
+    ({ s with log; typing_context }, Some msg))
 
 
 module ErrorReader = struct

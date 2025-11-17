@@ -2039,7 +2039,9 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
       WellTyped.ensure_base_type (Mu.loc_of_pexpr c_pe) ~expect:Bool (Mu.bt_of_pexpr c_pe)
     in
     check_pexpr c_pe (fun carg ->
-      let@ lc, e = choose [ (carg, e1); (not_ carg loc, e2) ] in
+      let@ lc, e =
+        choose ~msg:"(if/else)" [ ("true", (carg, e1)); ("false", (not_ carg loc, e2)) ]
+      in
       let@ () = add_c loc (LC.T lc) in
       let@ provable = provable loc in
       let here = Locations.other __LOC__ in

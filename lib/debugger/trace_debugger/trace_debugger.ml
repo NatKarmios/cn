@@ -201,13 +201,7 @@ let apply_node t (node : Node.t) (dt : Display_trace.t) =
       let next = [ ("", next_id) ] in
       inner_from_bp t ~trace ~prev:id ~parent b next
     | Choice (b, cs) ->
-      let next =
-        List.map
-          (fun (i, n) ->
-             let next_id = new_node t ~trace ~prev:id ?parent n in
-             (Int.to_string i, next_id))
-          cs
-      in
+      let next = List.map_snd (fun n -> new_node t ~trace ~prev:id ?parent n) cs in
       inner_from_bp t ~trace ~prev:id ~parent b next
   in
   node.inner <- Computed inner;
