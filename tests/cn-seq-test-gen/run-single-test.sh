@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 
 CN=$OPAM_SWITCH_PREFIX/bin/cn
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail -o noclobber
 
 USAGE="USAGE: $0 -h\n       $0 [-nqu] FILE.c"

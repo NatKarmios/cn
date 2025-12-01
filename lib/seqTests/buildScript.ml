@@ -2,7 +2,7 @@ module Config = SeqTestGenConfig
 open Pp
 
 let setup ~output_dir =
-  string "#!/bin/bash"
+  string "#!/usr/bin/env bash"
   ^^ twice hardline
   ^^ string "# copied from cn-runtime-single-file.sh"
   ^^ hardline

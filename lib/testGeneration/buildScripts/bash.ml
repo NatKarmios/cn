@@ -2,7 +2,7 @@ module Config = TestGenConfig
 open Pp
 
 let setup ~output_dir =
-  !^"#!/bin/bash"
+  !^"#!/usr/bin/env bash"
   ^^ twice hardline
   ^^ !^"# Auto-generated bash script for CN test generation"
   ^^ hardline
