@@ -111,7 +111,7 @@ module Trace = struct
   open Pp.Infix
 
   type 'nest breakpoint'' =
-    | Msg of string
+    | Msg of string Lazy.t
     | Nest of string * 'nest
 
   type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
@@ -240,7 +240,7 @@ module Trace = struct
   and display_breakpoint (Bp (c, b)) =
     let msg, nest =
       match b with
-      | Msg s -> (s, [])
+      | Msg s -> (Lazy.force s, [])
       | Nest (s, nest) ->
         let nest' = [ display_next nest ] in
         (s, nest')
@@ -305,7 +305,7 @@ let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_o
 
 let choice ?(msg = "choice") (cases : (string * 'a t) list) : 'a t =
   fun s ->
-  let b = Bp ((s.typing_context, s.backup_loc), Msg msg) in
+  let b = Bp ((s.typing_context, s.backup_loc), Msg (Lazy.from_val msg)) in
   let cs =
     cases
     |> List.map
@@ -474,7 +474,7 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify' (f : s -> s * string option) : unit t =
+let modify' (f : s -> s * string Lazy.t option) : unit t =
   let@ s = get () in
   let s', log = f s in
   let m = set s' in
@@ -534,8 +534,8 @@ let show_action a =
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
   modify' (fun s ->
     let log_entry = Explain.Action (a, loc) in
-    let b = Some ("<" ^ show_action a ^ ">") in
-    ({ s with log = log_entry :: s.log }, b))
+    let msg = lazy ("<" ^ show_action a ^ ">") in
+    ({ s with log = log_entry :: s.log }, Some msg))
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
@@ -543,7 +543,9 @@ let modify_where (f : Where.t -> Where.t) : unit t =
     let log_entry = Explain.State s.typing_context in
     let log = log_entry :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
-    let msg = Option.value ~default:"?" (get_source_in_where typing_context.where) in
+    let msg =
+      lazy (Option.value ~default:"?" (get_source_in_where typing_context.where))
+    in
     ({ s with log; typing_context }, Some msg))
 
 

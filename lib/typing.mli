@@ -6,7 +6,7 @@ type 'a m = 'a t
 
 module Trace : sig
   type 'nest breakpoint'' =
-    | Msg of string
+    | Msg of string Lazy.t
     | Nest of string * 'nest
 
   type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
