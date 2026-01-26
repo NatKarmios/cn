@@ -243,6 +243,15 @@ module Make (Config : CONFIG) = struct
     | CaseCtor (ctor, pats) -> pp_ctor ctor ^^ Pp.parens (comma_list pp_pattern pats)
 
 
+  let rec pp_pattern_small (Pattern (_, _, _, pat)) =
+    match pat with
+    | CaseBase (None, _) -> Pp.underscore
+    | CaseBase (Some sym, _) -> pp_symbol sym
+    | CaseCtor (Ctuple, pats) -> Pp.parens (comma_list pp_pattern_small pats)
+    | CaseCtor (ctor, pats) ->
+      pp_ctor ctor ^^ Pp.parens (comma_list pp_pattern_small pats)
+
+
   let abbreviated = Pp.dot ^^ Pp.dot ^^ Pp.dot
 
   let pp_pure_memop = function

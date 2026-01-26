@@ -200,7 +200,8 @@ let apply_node t (node : Node.t) (dt : Display_trace.t) =
       let next_id = new_node t ~trace ~prev:id ?parent n in
       let next = [ ("", next_id) ] in
       inner_from_bp t ~trace ~prev:id ~parent b next
-    | Choice (b, cs) ->
+    | Choice (b, c) ->
+      let cs = Display_trace.T.Choice.compute c in
       let next = List.map_snd (fun n -> new_node t ~trace ~prev:id ?parent n) cs in
       inner_from_bp t ~trace ~prev:id ~parent b next
   in
@@ -214,7 +215,7 @@ let poll_node t node =
   match node.Node.inner with
   | Root _ | Computed _ -> []
   | Pending n ->
-    let dt = Display_trace.T.poll_next n in
+    let dt = Display_trace.T.Next.poll n in
     Option.fold ~some:(apply_node t node) ~none:[] dt
 
 
@@ -222,7 +223,7 @@ let force_node t node =
   match node.Node.inner with
   | Root _ | Computed _ -> []
   | Pending n ->
-    let dt = Display_trace.T.compute_next n in
+    let dt = Display_trace.T.Next.compute n in
     apply_node t node dt
 
 
@@ -247,7 +248,7 @@ let poll_pending_nodes t =
   poll_nodes_deep t pending_ids
 
 
-let trace_to_next dt = Display_trace.T.next_of_memo (Memo.make' dt)
+let trace_to_next dt = Display_trace.T.Next.of_memo (Memo.make' dt)
 
 let jump ?(override_active_trace = true) t id =
   let node = get_node t id in

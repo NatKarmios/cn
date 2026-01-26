@@ -8,7 +8,8 @@ let print_log_file =
   let print_count = ref 0 in
   let print_file filename = function
     | `CORE file -> Pp.print_file (filename ^ ".core") (CF.Pp_core.All.pp_file file)
-    | `MUCORE file -> Pp.print_file (filename ^ ".mucore") (Pp_mucore.pp_file file)
+    | `MUCORE file ->
+      Pp.print_file (filename ^ ".mucore") (Pp_mucore.Basic.pp_file None file)
   in
   fun (filename, file) ->
     if !Cerb_debug.debug_level > 0 then (
@@ -20,6 +21,7 @@ let print_log_file =
           (string_of_int count ^ "__" ^ filename)
       in
       print_file file_path file;
+      Fmt.pr "%s\n" file_path;
       print_count := 1 + !print_count;
       Cerb_colour.do_colour := true)
 

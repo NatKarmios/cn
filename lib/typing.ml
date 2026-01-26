@@ -25,66 +25,6 @@ let loc_of_where (w : Where.t) =
   | None -> None
 
 
-let cap start str = min (max 0 start) (String.length str)
-
-let get_source_in_where (w : Where.t) : string option =
-  let ( let* ) = Option.bind in
-  let* loc = loc_of_where w in
-  let* start_pos = Locations.start_pos loc in
-  let source = Cerb_position.file start_pos in
-  let start_line = Cerb_position.line start_pos - 1 in
-  let start_char = Cerb_position.column start_pos - 1 in
-  let end_pos = Locations.end_pos' loc in
-  let ic = open_in source in
-  try
-    Fun.protect ~finally:(fun () -> close_in ic)
-    @@ fun () ->
-    for _ = 0 to start_line - 1 do
-      ignore (input_line ic)
-    done;
-    match end_pos with
-    | None ->
-      (* Read to end of line *)
-      let line = input_line ic in
-      let start_char = cap start_char line in
-      (* let s = String.sub line start_char (String.length line - start_char) in *)
-      let s = String.sub line start_char 1 in
-      Debugger.Log.log_to_file ("smol: " ^ s);
-      Some s
-    | Some end_pos ->
-      let end_line = Cerb_position.line end_pos - 1 in
-      let end_char = Cerb_position.column end_pos - 1 in
-      if end_line = start_line then (
-        let line = input_line ic in
-        let start_char = cap start_char line in
-        let end_char = cap end_char line in
-        let s = String.sub line start_char (end_char - start_char) in
-        Some s)
-      else (
-        let buffer = Buffer.create 1024 in
-        for current_line = start_line to end_line do
-          let line = input_line ic in
-          if current_line = start_line then (
-            Debugger.Log.log_to_file "start";
-            let start_char = cap start_char line in
-            let len = String.length line - start_char in
-            Buffer.add_substring buffer line start_char len)
-          else if current_line = end_line then (
-            Debugger.Log.log_to_file "end";
-            let len = cap end_char line in
-            Buffer.add_substring buffer line 0 len)
-          else (
-            Debugger.Log.log_to_file "mid";
-            Buffer.add_string buffer line);
-          Buffer.add_char buffer '\n'
-        done;
-        let s = Buffer.contents buffer in
-        Debugger.Log.log_to_file ("big: " ^ s);
-        Some s)
-  with
-  | End_of_file -> None
-
-
 type s =
   { typing_context : Context.t;
     solver : (solver * solver_frame) option;
@@ -110,35 +50,43 @@ module Trace = struct
   open Context
   open Pp.Infix
 
-  type 'nest breakpoint'' =
-    | Msg of string Lazy.t
-    | Nest of string * 'nest
+  type msg = string Lazy.t
 
-  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
+  type 'nest step =
+    { msg : string Lazy.t;
+      nest : 'nest list;
+      typing_context : Context.t;
+      backup_loc : Cerb_location.t option;
+      step_in : bool
+    }
 
-  type 'a next' = s * (s -> 'a)
-
-  type case' = string
-
-  let map_next' (s, n) f = (s, fun s' -> f (n s'))
+  type 'nest breakpoint' =
+    | Step of 'nest step
+    | Step_out
 
   module Args = struct
-    type 'a next = 'a next'
-
     type 'a breakpoint = 'a breakpoint'
 
-    type nonrec case = case'
+    type case = string
 
     type nest_result = unit Or_TypeError.t
 
-    let compute_next (s, n) =
-      Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
-      n s
+    let get_nested = function Step b -> b.nest | Step_out -> []
+
+    module Next = struct
+      type 'a t = s * (s -> 'a)
+
+      let map (s, n) f = (s, fun s' -> f (n s'))
+
+      let compute (s, n) =
+        Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
+        n s
 
 
-    let map_next = map_next'
+      let poll _ = None
+    end
 
-    let get_nested = function _, Nest (_, nest) -> [ nest ] | _ -> []
+    module Choice = Memo
   end
 
   include T.Make_memoized (Args)
@@ -205,7 +153,7 @@ module Trace = struct
         }
 
 
-  let display_context ((c, l) : Context.t * Cerb_location.t option) : DT.state =
+  let display_context (c : Context.t) (l : Cerb_location.t option) : DT.state =
     let vars : DT.Variable.ts =
       [ ("Computational", display_sym_map c.computational);
         ("Logical", display_sym_map c.logical);
@@ -217,47 +165,113 @@ module Trace = struct
     { vars; frames }
 
 
-  let rec display : unit Or_TypeError.t t -> DT.t = function
+  type display_ctx = { on_step_out : (unit Or_TypeError.t next -> unit) option }
+
+  let poll_next (n : DT.next) : bool =
+    let ( let* ) = Option.bind in
+    Option.is_some
+      (let* t = DT.T.Next.poll n in
+       DT.T.poll_fold (fun _ _ -> ()) () t)
+
+
+  let force_next (n : DT.next) =
+    let t = DT.T.Next.compute n in
+    DT.T.fold (fun _ _ -> ()) () t
+
+
+  let rec display' (ctx : display_ctx) : unit Or_TypeError.t t -> DT.t = function
     | End (Ok ()) -> End (Ok "Ok")
     | End (Error e) -> End (Error (TypeErrors.to_string_short e))
     | Vanish -> Vanish
-    | Breakpoint (b, n) ->
-      let b' = display_breakpoint b in
-      let n' = display_next n in
-      Breakpoint (b', n')
-    | Choice (b, cs) ->
-      let b' = display_breakpoint b in
-      let cs' = List.map (fun (i, n) -> (i, display_next n)) cs in
-      Choice (b', cs')
+    | Breakpoint (b, n) -> display_breakpoint ctx b n
+    | Choice (b, c) -> display_choice ctx b c
 
 
-  and display_next (n : unit Or_TypeError.t next) : DT.next =
-    let memo = next_to_memo n in
-    let memo' = Memo.map memo display in
-    DT.T.next_of_memo memo'
+  and display_next ctx (n : unit Or_TypeError.t next) : DT.next =
+    let memo = Next.to_memo n in
+    let memo' = Memo.map memo (display' ctx) in
+    DT.T.Next.of_memo memo'
 
 
-  and display_breakpoint (Bp (c, b)) =
-    let msg, nest =
-      match b with
-      | Msg s -> (Lazy.force s, [])
-      | Nest (s, nest) ->
-        let nest' = [ display_next nest ] in
-        (s, nest')
-    in
-    let state = lazy (display_context c) in
+  and display_step ctx { msg; nest; typing_context; backup_loc; _ } =
+    let msg = Lazy.force msg in
+    let nest = List.map (display_next ctx) nest in
+    let state = lazy (display_context typing_context backup_loc) in
     let get_state () = Lazy.force state in
-    DT.breakpoint ~msg ~nest ~get_state
+    (msg, nest, get_state)
+
+
+  and display_step_out ctx n : DT.t =
+    let () =
+      match ctx.on_step_out with Some f -> f n | None -> failwith "Couldn't step out"
+    in
+    End (Ok "Stepping out...")
+
+
+  and mk_step_in ctx (n : unit Or_TypeError.t next) : DT.next * DT.choice =
+    let nexts = ref [] in
+    let on_step_out = Some (fun n -> nexts := n :: !nexts) in
+    let inner = display_next { on_step_out } n in
+    let mk_cases () =
+      List.mapi (fun i n -> (Int.to_string i, display_next ctx n)) (List.rev !nexts)
+    in
+    let poll () =
+      if poll_next inner then
+        Some (mk_cases ())
+      else
+        None
+    in
+    let force () =
+      force_next inner;
+      mk_cases ()
+    in
+    let memo = Memo.make ~poll force () in
+    (inner, DT.T.Choice.of_memo memo)
+
+
+  and display_breakpoint ctx b n =
+    match b with
+    | Bp Step_out -> display_step_out ctx n
+    | Bp (Step b) ->
+      let msg, nest, get_state = display_step ctx b in
+      if b.step_in then (
+        let inner, c = mk_step_in ctx n in
+        let nest = nest @ [ inner ] in
+        let b' = DT.breakpoint ~msg ~nest ~get_state in
+        Choice (b', c))
+      else (
+        let b' = DT.breakpoint ~msg ~nest ~get_state in
+        let n' = display_next ctx n in
+        Breakpoint (b', n'))
+
+
+  and display_choice ctx b (c : unit Or_TypeError.t choice) =
+    let b' =
+      match b with
+      | Bp Step_out -> failwith "Unexpected Step_out on Choice"
+      | Bp (Step b) ->
+        let msg, nest, get_state = display_step ctx b in
+        DT.breakpoint ~msg ~nest ~get_state
+    in
+    let c' =
+      let memo = Choice.to_memo c in
+      let memo' = Memo.map memo (List.map_snd (display_next ctx)) in
+      DT.T.Choice.of_memo memo'
+    in
+    Choice (b', c')
+
+
+  let display = display' { on_step_out = None }
 end
 
 open T
 open Trace
 
-type breakpoint = unit Or_TypeError.t Trace.next Trace.breakpoint'
-
 type 'a pause = ('a * s) Or_TypeError.t
 
-type 'a t = s -> ('a * s) Or_TypeError.t Trace.t
+type 'a trace = ('a * s) Or_TypeError.t Trace.t
+
+type 'a t = s -> 'a trace
 
 type 'a m = 'a t
 
@@ -270,6 +284,8 @@ let end_error e = End (Error e)
 (* basic functions *)
 
 let return (a : 'a) : 'a t = fun s -> end_ok a s
+
+let vanish () : 'a t = fun _ -> Vanish
 
 let fail (f : failure) : 'a t = fun s -> end_error @@ f (s.typing_context, s.log)
 
@@ -301,55 +317,70 @@ let push_solver s =
   s'
 
 
-let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_ok ())
+let make_breakpoint ?(step_in = false) ?(nest = []) ?(msg = Lazy.from_val "?") s =
+  let { typing_context; backup_loc; _ } : s = s in
+  Step { msg; nest; typing_context; backup_loc; step_in }
 
-let choice ?(msg = "choice") (cases : (string * 'a t) list) : 'a t =
+
+let breakpoint' ?step_in ?nest ?msg s' : unit t =
   fun s ->
-  let b = Bp ((s.typing_context, s.backup_loc), Msg (Lazy.from_val msg)) in
-  let cs =
+  let b = make_breakpoint ?step_in ?nest ?msg s' in
+  Trace.breakpoint b (s, end_ok ())
+
+
+let step_out = fun s -> Trace.breakpoint Step_out (s, end_ok ())
+
+let breakpoint ?step_in ?nest msg : unit t =
+  fun s -> (breakpoint' ?step_in ?nest ~msg s) s
+
+
+let choice ?msg (cases : (string * 'a t) list) : 'a t =
+  fun s ->
+  let b = Bp (make_breakpoint ?msg s) in
+  let c =
     cases
-    |> List.map
-       @@ fun (label, m) ->
-       let s' = with_new_solver_frame s in
-       (label, Trace.next (s', m))
+    |> List.map (fun (label, m) ->
+      let s' = with_new_solver_frame s in
+      (label, (s', m)))
+    |> Memo.make'
   in
-  T.Choice (b, cs)
+  T.Choice (b, Choice.make c)
 
 
 let choose ?msg (cases : (string * 'a) list) : 'a t =
   choice ?msg (List.map_snd return cases)
 
 
-let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+let collect_pauses ?msg (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
   fun s ->
-  let sub = next (with_new_solver_frame s, m) in
-  let sub' = map_next sub Or_TypeError.unit in
-  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
+  let sub = Next.make (with_new_solver_frame s, m) in
+  let nest = [ Next.map sub Or_TypeError.unit ] in
+  let b = make_breakpoint ~nest ?msg s in
   let m' =
     fun s' ->
-    let t = compute_next sub in
+    let t = Next.compute sub in
     let x = fold f acc t in
     end_ok x s'
   in
   Trace.breakpoint b (with_new_solver_frame s, m')
 
 
-let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
+let collect ?msg (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
   fun s ->
   let f = fun acc (x, _) -> f acc x in
-  let sub = next (with_new_solver_frame s, m) in
-  let sub' = map_next sub Or_TypeError.unit in
-  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
+  let sub = Next.make (with_new_solver_frame s, m) in
+  let nest = [ Next.map sub Or_TypeError.unit ] in
+  let b = make_breakpoint ~nest ?msg s in
   let m' : 'b Or_TypeError.t t =
     fun s' ->
-    let t = compute_next sub in
+    let t = Next.compute sub in
     let r = flaky_fold f acc t in
     end_ok r s'
   in
   Trace.breakpoint b (with_new_solver_frame s, m')
 
 
-let collect_unit = collect (fun () () -> ()) ()
+let collect_unit ?msg = collect ?msg (fun () () -> ()) ()
 
 let get () : s t = fun s -> end_ok s s
 
@@ -438,7 +469,7 @@ let iterM = Eff.ListM.iterM
 
 (* functions to make values derived from the monad state *)
 
-let make_simp_ctxt s =
+let make_simp_ctxt (s : s) =
   Simplify.
     { global = s.typing_context.global; values = s.sym_eqs; simp_hook = (fun _ -> None) }
 
@@ -474,18 +505,11 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify' (f : s -> s * string Lazy.t option) : unit t =
+let modify (f : s -> s) : unit t =
   let@ s = get () in
-  let s', log = f s in
-  let m = set s' in
-  match log with
-  | Some msg ->
-    let@ () = breakpoint ((s'.typing_context, s'.backup_loc), Msg msg) in
-    m
-  | None -> m
+  let s' = f s in
+  set s'
 
-
-let modify (f : s -> s) : unit t = modify' (fun s -> (f s, None))
 
 let get_typing_context () : Context.t t = inspect (fun s -> s.typing_context)
 
@@ -515,38 +539,18 @@ let set_global (g : Global.t) : unit t =
   modify_typing_context (fun s -> { s with global = g })
 
 
-let show_action a =
-  let open Explain in
-  let open Pp in
-  let open Pp.Infix in
-  let doc : PPrint.document =
-    match a with
-    | Read (ptr, v) -> IT.pp v ^^ !^" = *" ^^ IT.pp ptr
-    | Write (ptr, v) -> !^"*" ^^ IT.pp ptr ^^ !^" = " ^^ IT.pp v
-    | Create a -> !^"Create " ^^ IT.pp a
-    | Kill a -> !^"Kill " ^^ IT.pp a
-    | Call { fsym; args; _ } -> Sym.pp fsym ^^ !^"(" ^^ list IT.pp args ^^ !^")"
-    | Return { arg; _ } -> !^"Return " ^^ IT.pp arg
-  in
-  Pp.plain doc
-
-
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
-  modify' (fun s ->
+  modify (fun s ->
     let log_entry = Explain.Action (a, loc) in
-    let msg = lazy ("<" ^ show_action a ^ ">") in
-    ({ s with log = log_entry :: s.log }, Some msg))
+    { s with log = log_entry :: s.log })
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
-  modify' (fun s ->
+  modify (fun s ->
     let log_entry = Explain.State s.typing_context in
     let log = log_entry :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
-    let msg =
-      lazy (Option.value ~default:"?" (get_source_in_where typing_context.where))
-    in
-    ({ s with log; typing_context }, Some msg))
+    { s with log; typing_context })
 
 
 module ErrorReader = struct
@@ -1079,3 +1083,5 @@ let map_and_fold_resources loc f acc = map_and_fold_resources_internal loc f acc
 (* let _model_with loc prop = model_with_internal loc prop *)
 
 (* auxiliary functions for diagnostics *)
+
+let breakpoint = breakpoint ?nest:None

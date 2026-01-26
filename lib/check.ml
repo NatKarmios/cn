@@ -1570,8 +1570,10 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
   match e_ with
   | Epure pe ->
     let@ () = WellTyped.ensure_base_type loc ~expect (Mu.bt_of_pexpr pe) in
+    let@ () = breakpoint (lazy "pure") in
     check_pexpr pe (fun lvt -> k lvt)
   | Ememop (m, pes) ->
+    let@ () = breakpoint (lazy "memop") in
     let memop = (m, pes) in
     let here = Locations.other __LOC__ in
     let pointer_eq ?(negate = false) pe1 pe2 =
@@ -1831,6 +1833,10 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
        let@ () = WellTyped.check_ct act.loc act.ct in
        let@ () = WellTyped.ensure_base_type loc ~expect (Loc ()) in
        let@ () = WellTyped.ensure_bits_type loc (Mu.bt_of_pexpr pe) in
+       let@ () =
+         let msg = lazy ("create " ^ Pp.plain @@ Pp_mucore.Basic.pp_actype act) in
+         breakpoint msg
+       in
        check_pexpr pe (fun arg ->
          let ret_s, ret =
            match prefix with
@@ -1882,6 +1888,10 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
        let@ () = WellTyped.check_ct loc ct in
        let@ () = WellTyped.ensure_base_type loc ~expect Unit in
        let@ () = WellTyped.ensure_base_type loc ~expect:(Loc ()) (Mu.bt_of_pexpr pe) in
+       let@ () =
+         let msg = lazy ("kill " ^ Pp.plain @@ Pp_mucore.pp_pexpr_w (Some 3) pe) in
+         breakpoint msg
+       in
        check_pexpr pe (fun arg ->
          let@ _ =
            RI.Special.predicate_request
@@ -1903,6 +1913,15 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
            loc
            ~expect:(Memory.bt_of_sct act.ct)
            (Mu.bt_of_pexpr v_pe)
+       in
+       let@ () =
+         let msg =
+           lazy
+             (let p = Pp.plain @@ Pp_mucore.pp_pexpr_w (Some 3) p_pe in
+              let v = Pp.plain @@ Pp_mucore.pp_pexpr_w (Some 3) v_pe in
+              "store " ^ p ^ ", " ^ v)
+         in
+         breakpoint msg
        in
        check_pexpr p_pe (fun parg ->
          check_pexpr v_pe (fun varg ->
@@ -1943,6 +1962,10 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
        let@ () = WellTyped.check_ct act.loc act.ct in
        let@ () = WellTyped.ensure_base_type loc ~expect (Memory.bt_of_sct act.ct) in
        let@ () = WellTyped.ensure_base_type loc ~expect:(Loc ()) (Mu.bt_of_pexpr p_pe) in
+       let@ () =
+         let msg = lazy ("load " ^ Pp.plain @@ Pp_mucore.pp_pexpr_w (Some 3) p_pe) in
+         breakpoint msg
+       in
        check_pexpr p_pe (fun pointer ->
          let@ value = load loc pointer act.ct in
          k value)
@@ -1958,8 +1981,10 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
      | LinuxRMW (_ct, _sym1, _sym2, _mo) -> Cerb_debug.error "todo: LinuxRMW")
   | Eskip ->
     let@ () = WellTyped.ensure_base_type loc ~expect Unit in
+    let@ () = breakpoint (lazy "skip") in
     k (unit_ loc)
   | Eproc (name, pes) ->
+    let@ () = breakpoint (lazy "proc") in
     (match (name, pes) with
      | Impl (BuiltinFunction (("ctz" | "generic_ffs") as fn)), [ pe1 ] ->
        let@ _ = ensure_bitvector_type loc ~expect in
@@ -1984,6 +2009,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
        [@alert "-deprecated"])
   | Eccall (act, f_pe, pes, gargs_opt) ->
     let@ () = WellTyped.check_ct act.loc act.ct in
+    let@ () = breakpoint (lazy "ccall") in
     (* copied TS's, from wellTyped.ml *)
     (* let@ (_ret_ct, _arg_cts) = match act.ct with *)
     (*     | Pointer (Function (ret_v_ct, arg_r_cts, is_variadic)) -> *)
@@ -2040,13 +2066,14 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     in
     check_pexpr c_pe (fun carg ->
       let@ lc, e =
-        choose ~msg:"(if/else)" [ ("true", (carg, e1)); ("false", (not_ carg loc, e2)) ]
+        let msg = lazy ("if " ^ Pp.plain @@ Pp_mucore.pp_pexpr_w (Some 3) c_pe) in
+        choose ~msg [ ("true", (carg, e1)); ("false", (not_ carg loc, e2)) ]
       in
       let@ () = add_c loc (LC.T lc) in
       let@ provable = provable loc in
       let here = Locations.other __LOC__ in
       match provable (LC.T (bool_ false here)) with
-      | `True -> return ()
+      | `True -> vanish ()
       | `False -> check_expr labels e k)
   | Ebound e ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e) ~expect (Mu.bt_of_expr e) in
@@ -2054,6 +2081,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
   | End _ -> Cerb_debug.error "todo: End"
   | Elet (p, e1, e2) ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e2) ~expect (Mu.bt_of_expr e2) in
+    let@ () = breakpoint (lazy "let") in
     let@ () =
       WellTyped.ensure_base_type
         (Mu.loc_of_pattern p)
@@ -2069,14 +2097,18 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     let@ () =
       WellTyped.ensure_base_type loc ~expect (Tuple (List.map Mu.bt_of_expr es))
     in
+    let@ () = breakpoint ~step_in:true (lazy "unseq") in
     let rec aux es vs =
       match es with
       | e :: es' -> check_expr labels e (fun v -> aux es' (v :: vs))
-      | [] -> k (tuple_ (List.rev vs) loc)
+      | [] ->
+        let@ () = step_out in
+        k (tuple_ (List.rev vs) loc)
     in
     aux es []
   | CN_progs (_, cn_progs) ->
     let@ () = WellTyped.ensure_base_type loc ~expect Unit in
+    let@ () = breakpoint (lazy "cn progs") in
     let do_unpack (req, o) =
       let@ provable = provable loc in
       let@ global = get_global () in
@@ -2338,13 +2370,37 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
         ~expect:(Mu.bt_of_expr e1)
         (Mu.bt_of_pattern p)
     in
+    let is_binding =
+      match p with Pattern (_, _, _, CaseBase (None, _)) -> false | _ -> true
+    in
+    let@ () =
+      if is_binding then (
+        let msg =
+          lazy
+            (let pat = Pp.plain @@ Pp_mucore.Basic.pp_pattern_small p in
+             "let " ^ pat ^ " = ...")
+        in
+        breakpoint ~step_in:true msg)
+      else
+        return ()
+    in
     check_expr labels e1 (fun it ->
       let@ bound_a, _path_cs = check_and_match_pattern p it in
+      let@ () =
+        if is_binding then
+          step_out
+        else
+          return ()
+      in
       check_expr labels e2 (fun it2 ->
         let@ () = remove_as bound_a in
         k it2))
   | Erun (label_sym, pes) ->
     let@ () = WellTyped.ensure_base_type loc ~expect Unit in
+    let@ () =
+      let msg = lazy ("run " ^ Pp.plain @@ Pp_mucore.pp_symbol label_sym) in
+      breakpoint msg
+    in
     let@ lt, lkind =
       match Sym.Map.find_opt label_sym labels with
       | None ->

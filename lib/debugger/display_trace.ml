@@ -32,24 +32,33 @@ type 'nest breakpoint =
 
 type t' = (string, string) Result.t
 
+module Delayed_simple = struct
+  type 'a t = unit -> 'a
+
+  let map d f = fun () -> f (d ())
+
+  let compute d = d ()
+
+  let poll _ = None
+end
+
 module T = Trace.Make_memoized (struct
     type nonrec 'nest breakpoint = 'nest breakpoint
 
     type case = string
 
-    type 'a next = unit -> 'a
-
     type nest_result = t'
 
-    let map_next n f = fun () -> f (n ())
-
-    let compute_next n = n ()
-
     let get_nested b = b.nest
+
+    module Next = Delayed_simple
+    module Choice = Delayed_simple
   end)
 
 type t = t' T.t
 
 type next = t' T.next
+
+type choice = t' T.choice
 
 let breakpoint ~get_state ~nest ~msg = T.Bp { msg; nest; get_state }

@@ -39,11 +39,49 @@ let map (m : 'a t) (f : 'a -> 'b) : 'b t =
   ref s
 
 
-let make (f : 'a -> 'b) (x : 'a) : 'b t =
+let make ?(poll : ('a -> 'b option) option) (f : 'a -> 'b) (x : 'a) : 'b t =
   let r = ref None in
-  let poll () = !r in
+  let poll () =
+    let () =
+      match (!r, poll) with
+      | Some _, _ | None, None -> ()
+      | None, Some poll -> r := poll x
+    in
+    !r
+  in
   let force () = match !r with None -> f x | Some y -> y in
   ref (Pending { poll; force })
 
 
 let make' (x : 'a) : 'a t = ref (Computed x)
+
+let of_list (memos : 'a t list) : 'a list t =
+  let poll () = List.map_opt poll memos in
+  let force () = List.map force memos in
+  make ~poll force ()
+
+
+let make_multi ?(poll : ('a -> 'b option) option) (f : 'a -> 'b) (xs : 'a list)
+  : 'b list t
+  =
+  let memos = List.map (make ?poll f) xs in
+  of_list memos
+
+
+let make_multi_i
+      ?(poll : (int -> 'a -> 'b option) option)
+      (f : int -> 'a -> 'b)
+      (xs : 'a list)
+  : 'b list t
+  =
+  let memos =
+    List.mapi
+      (fun i x ->
+         let poll = poll |> Option.map (fun p -> p i) in
+         make ?poll (f i) x)
+      xs
+  in
+  of_list memos
+
+
+let compute = force

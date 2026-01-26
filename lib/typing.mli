@@ -5,20 +5,11 @@ type 'a t
 type 'a m = 'a t
 
 module Trace : sig
-  type 'nest breakpoint'' =
-    | Msg of string Lazy.t
-    | Nest of string * 'nest
-
-  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
-
-  type 'a next'
-
-  include
-    Debugger.Trace.S
-    with type 'nest breakpoint' := 'nest breakpoint'
-     and type 'a next' := 'a next'
+  include Debugger.Trace.S
 
   val display : (unit, TypeErrors.t) Result.t t -> Debugger.Display_trace.t
+
+  type msg = string Lazy.t
 end
 
 type failure = Context.t * Explain.log -> TypeErrors.t
@@ -26,6 +17,8 @@ type failure = Context.t * Explain.log -> TypeErrors.t
 type 'a pause
 
 val return : 'a -> 'a m
+
+val vanish : unit -> 'a m
 
 val bind : 'a m -> ('a -> 'b m) -> 'b m
 
@@ -37,15 +30,24 @@ val fail : failure -> 'a m
 
 val set_backup_loc : Cerb_location.t -> unit m
 
-val choice : ?msg:string -> (string * 'a m) list -> 'a m
+val choice : ?msg:Trace.msg -> (string * 'a m) list -> 'a m
 
-val choose : ?msg:string -> (string * 'a) list -> 'a m
+val choose : ?msg:Trace.msg -> (string * 'a) list -> 'a m
 
-val collect_pauses : ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
+val breakpoint : ?step_in:bool -> Trace.msg -> unit m
 
-val collect : ('b -> 'a -> 'b) -> 'b -> 'a t -> ('b, TypeErrors.t) Result.t t
+val step_out : unit m
 
-val collect_unit : unit t -> (unit, TypeErrors.t) Result.t t
+val collect_pauses : ?msg:Trace.msg -> ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
+
+val collect
+  :  ?msg:Trace.msg ->
+  ('b -> 'a -> 'b) ->
+  'b ->
+  'a t ->
+  ('b, TypeErrors.t) Result.t t
+
+val collect_unit : ?msg:Trace.msg -> unit t -> (unit, TypeErrors.t) Result.t t
 
 val run : Context.t -> 'a m -> 'a pause Trace.t
 

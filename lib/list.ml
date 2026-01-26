@@ -92,3 +92,20 @@ let take n l =
 let range i j =
   let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in
   aux j []
+
+
+let map_opt (f : 'a -> 'b option) (xs : 'a list) : 'b list option =
+  let rec aux acc = function
+    | [] -> Some []
+    | x :: xs -> (match f x with Some y -> aux (y :: acc) xs | None -> None)
+  in
+  aux [] xs
+
+
+let map_prod (f : 'a -> 'b -> 'c) (xs : 'a list) (ys : 'b list) : 'c list =
+  let rec aux = function
+    | _, [] -> []
+    | [], _ :: ys' -> aux (xs, ys')
+    | x :: xs', y :: ys' -> f x y :: aux (xs', y :: ys')
+  in
+  aux (xs, ys)
