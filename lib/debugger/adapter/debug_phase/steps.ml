@@ -1,6 +1,6 @@
 open Sedap_types
 open Util
-open Trace_debugger
+open Tree_debugger
 
 let handle_continue (module Cfg : Cfg) =
   Cfg.handle
@@ -40,6 +40,22 @@ let handle_jump (module Cfg : Cfg) =
        Cfg.send_stopped Stopped_event.Payload.Reason.Step)
 
 
+let handle_step_in_at (module Cfg : Cfg) =
+  Cfg.handle
+    (module Step_in_at_command)
+    (fun { step_id } ->
+       let stop_reason = step_in_at Cfg.dbg step_id in
+       Cfg.send_stopped stop_reason)
+
+
+let handle_step_over_at (module Cfg : Cfg) =
+  Cfg.handle
+    (module Step_over_at_command)
+    (fun { step_id } ->
+       let stop_reason = step_over_at Cfg.dbg step_id in
+       Cfg.send_stopped stop_reason)
+
+
 let handle cfg =
   handle_continue cfg;
   handle_next cfg;
@@ -47,4 +63,6 @@ let handle cfg =
   handle_step_back cfg;
   handle_step_in cfg;
   handle_step_out cfg;
-  handle_jump cfg
+  handle_jump cfg;
+  handle_step_in_at cfg;
+  handle_step_over_at cfg

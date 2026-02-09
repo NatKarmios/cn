@@ -25,17 +25,20 @@ type state =
   }
 
 type 'nest breakpoint =
-  { msg : string;
-    nest : 'nest list;
-    get_state : unit -> state
-  }
+  | Step of
+      { msg : string;
+        get_state : unit -> state
+      }
+  | Nest of 'nest list
+  | Step_in
+  | Step_out
 
 type t' = (string, string) Result.t
 
-module T = Trace.Make_memoized (struct
+module T = Tree.Make_memoized (struct
     type nonrec 'nest breakpoint = 'nest breakpoint
 
-    type case = string
+    type case = string * int
 
     type 'a next = unit -> 'a
 
@@ -44,12 +47,16 @@ module T = Trace.Make_memoized (struct
     let map_next n f = fun () -> f (n ())
 
     let compute_next n = n ()
-
-    let get_nested b = b.nest
   end)
 
 type t = t' T.t
 
 type next = t' T.next
 
-let breakpoint ~get_state ~nest ~msg = T.Bp { msg; nest; get_state }
+let step get_state msg = T.Bp (Step { msg; get_state })
+
+let nest nest = T.Bp (Nest nest)
+
+let step_in = T.Bp Step_in
+
+let step_out = T.Bp Step_out

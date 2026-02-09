@@ -1,6 +1,6 @@
 open Sedap_types
 open Util
-open Trace_debugger
+open Tree_debugger
 
 let handle_threads (module Cfg : Cfg) =
   Cfg.handle

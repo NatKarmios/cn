@@ -424,7 +424,7 @@ module Debug = struct
         List.map_snd
           (fun check ->
              let trace = Typing.run_from_pause (fun _ -> pure check) checks_pause in
-             Typing.Trace.display trace)
+             Typing.Tree.display trace)
           checks
       in
       Ok traces

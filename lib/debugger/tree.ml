@@ -1,11 +1,11 @@
-include Trace_intf
+include Tree_intf
 
 module Make (A : Args) = struct
   type case = A.case
 
   type nest_result = A.nest_result
 
-  type 'a t = ('a, breakpoint, case, 'a next) trace
+  type 'a t = ('a, breakpoint, case, 'a next) tree
 
   and 'a next = Nx of 'a t A.next
 
@@ -22,9 +22,7 @@ module Make (A : Args) = struct
     | End x -> f x
     | Vanish -> Vanish
     | Breakpoint (b, n) -> Breakpoint (b, bind_next n f)
-    | Choice (b, cs) ->
-      let cs' = List.map_snd (fun n -> bind_next n f) cs in
-      Choice (b, cs')
+    | Choice cs -> Choice (List.map_snd (fun n -> bind_next n f) cs)
 
 
   and bind_next (Nx n : 'a next) (f : 'a -> 'b t) : 'b next =
@@ -52,7 +50,7 @@ module Make (A : Args) = struct
     | End (Error e) -> Error e
     | Vanish -> Ok acc
     | Breakpoint (_, n) -> flaky_fold f acc (compute_next n)
-    | Choice (_, cs) -> aux acc cs
+    | Choice cs -> aux acc cs
 
 
   let rec fold (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b =
@@ -60,8 +58,7 @@ module Make (A : Args) = struct
     | End x -> f acc x
     | Vanish -> acc
     | Breakpoint (_, n) -> fold f acc (compute_next n)
-    | Choice (_, cs) ->
-      List.fold_left (fun acc (_, n) -> fold f acc (compute_next n)) acc cs
+    | Choice cs -> List.fold_left (fun acc (_, n) -> fold f acc (compute_next n)) acc cs
 end
 
 module Make_memoized (A : Args) = struct
@@ -77,8 +74,6 @@ module Make_memoized (A : Args) = struct
       let map_next = Memo.map
 
       let compute_next = Memo.force
-
-      let get_nested = A.get_nested
     end)
 
   include T

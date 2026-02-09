@@ -11,7 +11,7 @@ let handle_breakpoints (module Cfg : Cfg) =
          |> Option.value ~default:[]
          |> List.map (fun bp -> bp.Source_breakpoint.line)
        in
-       Trace_debugger.set_breakpoints Cfg.dbg source lines;
+       Tree_debugger.set_breakpoints Cfg.dbg source lines;
        let breakpoints =
          lines
          |> List.map (fun line ->
@@ -37,7 +37,7 @@ let handle_launch (module Cfg : Cfg) resolver =
        log_to_file "launching!";
        match Cfg.launch launch_args with
        | Ok traces ->
-         Trace_debugger.launch Cfg.dbg traces;
+         Tree_debugger.launch Cfg.dbg traces;
          Cfg.send_stopped Stopped_event.Payload.Reason.Step;%lwt
          Lwt.wakeup_later resolver ();
          Lwt.return_unit

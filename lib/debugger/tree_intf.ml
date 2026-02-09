@@ -1,9 +1,9 @@
 module Types = struct
-  type ('result, 'breakpoint, 'choice_case, 'next) trace =
+  type ('result, 'breakpoint, 'choice_case, 'next) tree =
     | End of 'result
     | Vanish
     | Breakpoint of 'breakpoint * 'next
-    | Choice of 'breakpoint * ('choice_case * 'next) list
+    | Choice of ('choice_case * 'next) list
 end
 
 include Types
@@ -20,8 +20,6 @@ module type Args = sig
   val map_next : 'a next -> ('a -> 'b) -> 'b next
 
   val compute_next : 'a next -> 'a
-
-  val get_nested : 'nest breakpoint -> 'nest list
 end
 
 module type S = sig
@@ -37,7 +35,7 @@ module type S = sig
 
   type breakpoint = Bp of nest_result next breakpoint'
 
-  type 'a t = ('a, breakpoint, case, 'a next) trace
+  type 'a t = ('a, breakpoint, case, 'a next) tree
 
   val compute_next : 'a next -> 'a t
 
@@ -87,10 +85,10 @@ module type Intf = sig
     val next_of_memo : 'a t Memo.t -> 'a next
   end
 
-  type ('result, 'breakpoint, 'choice_case, 'next) trace =
-        ('result, 'breakpoint, 'choice_case, 'next) Types.trace =
+  type ('result, 'breakpoint, 'choice_case, 'next) tree =
+        ('result, 'breakpoint, 'choice_case, 'next) Types.tree =
     | End of 'result
     | Vanish
     | Breakpoint of 'breakpoint * 'next
-    | Choice of 'breakpoint * ('choice_case * 'next) list
+    | Choice of ('choice_case * 'next) list
 end

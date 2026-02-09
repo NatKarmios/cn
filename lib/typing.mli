@@ -4,21 +4,30 @@ type 'a t
 
 type 'a m = 'a t
 
-module Trace : sig
-  type 'nest breakpoint'' =
-    | Msg of string Lazy.t
-    | Nest of string * 'nest
+module Tree : sig
+  type step =
+    { msg : string;
+      ctx : Context.t;
+      backup_loc : Cerb_location.t option
+    }
 
-  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
+  type 'nest breakpoint' =
+    | Step of step
+    | Nest of 'nest
+    | Step_in
+    | Step_out
 
   type 'a next'
 
+  type case' = Branch_Eif of bool
+
   include
-    Debugger.Trace.S
+    Debugger.Tree.S
     with type 'nest breakpoint' := 'nest breakpoint'
      and type 'a next' := 'a next'
+     and type case = case'
 
-  val display : (unit, TypeErrors.t) Result.t t -> Debugger.Display_trace.t
+  val display : (unit, TypeErrors.t) Result.t t -> Debugger.Display_tree.t
 end
 
 type failure = Context.t * Explain.log -> TypeErrors.t
@@ -37,17 +46,23 @@ val fail : failure -> 'a m
 
 val set_backup_loc : Cerb_location.t -> unit m
 
-val choice : ?msg:string -> (string * 'a m) list -> 'a m
+val breakpoint : string -> unit m
 
-val choose : ?msg:string -> (string * 'a) list -> 'a m
+val vanish : unit m
 
-val collect_pauses : ('b -> 'a pause -> 'b) -> 'b -> 'a t -> 'b t
+val step_in : unit m
+
+val step_out : unit m
+
+val choice : (Tree.case * 'a m) list -> 'a m
+
+val choose : (Tree.case * 'a) list -> 'a m
 
 val collect : ('b -> 'a -> 'b) -> 'b -> 'a t -> ('b, TypeErrors.t) Result.t t
 
 val collect_unit : unit t -> (unit, TypeErrors.t) Result.t t
 
-val run : Context.t -> 'a m -> 'a pause Trace.t
+val run : Context.t -> 'a m -> 'a pause Tree.t
 
 val run_unit : Context.t -> 'a m -> (unit, TypeErrors.t) Result.t
 
@@ -55,9 +70,9 @@ val run_single : Context.t -> 'a m -> ('a, TypeErrors.t) Result.t
 
 val run_to_single_pause : Context.t -> 'a m -> 'a pause
 
-val run_from_pause : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t Trace.t
+val run_from_pause : ('a -> 'b m) -> 'a pause -> ('b, TypeErrors.t) Result.t Tree.t
 
-val run_from_pause' : ('a -> 'b m) -> 'a pause -> 'b pause Trace.t
+val run_from_pause' : ('a -> 'b m) -> 'a pause -> 'b pause Tree.t
 
 val run_from_pause_unit : ('a -> 'b m) -> 'a pause -> (unit, TypeErrors.t) Result.t
 
@@ -227,8 +242,8 @@ val record_action : Explain.action * Locations.t -> unit m
 
 val modify_where : (Where.t -> Where.t) -> unit m
 
-(* val add_label_to_trace : (Locations.t * Context.label_kind) option -> unit m *)
-(* val add_trace_item_to_trace : Context.trace_item * Locations.t -> unit m *)
+(* val add_label_to_tree : (Locations.t * Context.label_kind) option -> unit m *)
+(* val add_tree_item_to_tree : Context.tree_item * Locations.t -> unit m *)
 
 val init_solver : unit -> unit m
 

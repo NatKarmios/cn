@@ -1553,6 +1553,15 @@ let bytes_constraints
        return (and_ [ all_some; bytes_prov_eq; eq_ (value_addr, bytes_addr) here ] here))
 
 
+let nest (k : IT.t -> unit m) : (IT.t -> unit m) m =
+  let@ () = step_in in
+  let k' v =
+    let@ () = step_out in
+    k v
+  in
+  return k'
+
+
 let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
   let (Expr (loc, annots, expect, e_)) = e in
   let@ () = add_trace_information labels annots in
@@ -1567,6 +1576,8 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     let here = Locations.other __LOC__ in
     bytes_qpred sym (sizeOf_ ct here) pointer init
   in
+  let pp_e () = Pp.plain @@ Pp_mucore.pp_expr_w (Some 3) e in
+  let@ () = breakpoint (pp_e ()) in
   match e_ with
   | Epure pe ->
     let@ () = WellTyped.ensure_base_type loc ~expect (Mu.bt_of_pexpr pe) in
@@ -2040,17 +2051,20 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     in
     check_pexpr c_pe (fun carg ->
       let@ lc, e =
-        choose ~msg:"(if/else)" [ ("true", (carg, e1)); ("false", (not_ carg loc, e2)) ]
+        let case_true = (Tree.Branch_Eif true, (carg, e1)) in
+        let case_false = (Tree.Branch_Eif false, (not_ carg loc, e2)) in
+        choose [ case_true; case_false ]
       in
       let@ () = add_c loc (LC.T lc) in
       let@ provable = provable loc in
       let here = Locations.other __LOC__ in
       match provable (LC.T (bool_ false here)) with
-      | `True -> return ()
+      | `True -> vanish
       | `False -> check_expr labels e k)
   | Ebound e ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e) ~expect (Mu.bt_of_expr e) in
-    check_expr labels e k
+    let@ k' = nest k in
+    check_expr labels e k'
   | End _ -> Cerb_debug.error "todo: End"
   | Elet (p, e1, e2) ->
     let@ () = WellTyped.ensure_base_type (Mu.loc_of_expr e2) ~expect (Mu.bt_of_expr e2) in
@@ -2069,10 +2083,11 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     let@ () =
       WellTyped.ensure_base_type loc ~expect (Tuple (List.map Mu.bt_of_expr es))
     in
+    let@ k' = nest k in
     let rec aux es vs =
       match es with
       | e :: es' -> check_expr labels e (fun v -> aux es' (v :: vs))
-      | [] -> k (tuple_ (List.rev vs) loc)
+      | [] -> k' (tuple_ (List.rev vs) loc)
     in
     aux es []
   | CN_progs (_, cn_progs) ->
@@ -2338,8 +2353,19 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
         ~expect:(Mu.bt_of_expr e1)
         (Mu.bt_of_pattern p)
     in
+    let@ maybe_step_out =
+      match p with
+      | Pattern (_, _, _, CaseBase (None, _)) ->
+        (* non-binding let *)
+        return (return ())
+      | _ ->
+        (* binding let *)
+        let@ () = step_in in
+        return step_out
+    in
     check_expr labels e1 (fun it ->
       let@ bound_a, _path_cs = check_and_match_pattern p it in
+      let@ () = maybe_step_out in
       check_expr labels e2 (fun it2 ->
         let@ () = remove_as bound_a in
         k it2))

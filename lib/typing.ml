@@ -3,7 +3,7 @@ module Req = Request
 module LC = LogicalConstraints
 module Loc = Locations
 module IT = IndexTerms
-module T = Debugger.Trace
+module T = Debugger.Tree
 
 let unfold_multiclause_preds = ref false
 
@@ -25,66 +25,6 @@ let loc_of_where (w : Where.t) =
   | None -> None
 
 
-let cap start str = min (max 0 start) (String.length str)
-
-let get_source_in_where (w : Where.t) : string option =
-  let ( let* ) = Option.bind in
-  let* loc = loc_of_where w in
-  let* start_pos = Locations.start_pos loc in
-  let source = Cerb_position.file start_pos in
-  let start_line = Cerb_position.line start_pos - 1 in
-  let start_char = Cerb_position.column start_pos - 1 in
-  let end_pos = Locations.end_pos' loc in
-  let ic = open_in source in
-  try
-    Fun.protect ~finally:(fun () -> close_in ic)
-    @@ fun () ->
-    for _ = 0 to start_line - 1 do
-      ignore (input_line ic)
-    done;
-    match end_pos with
-    | None ->
-      (* Read to end of line *)
-      let line = input_line ic in
-      let start_char = cap start_char line in
-      (* let s = String.sub line start_char (String.length line - start_char) in *)
-      let s = String.sub line start_char 1 in
-      Debugger.Log.log_to_file ("smol: " ^ s);
-      Some s
-    | Some end_pos ->
-      let end_line = Cerb_position.line end_pos - 1 in
-      let end_char = Cerb_position.column end_pos - 1 in
-      if end_line = start_line then (
-        let line = input_line ic in
-        let start_char = cap start_char line in
-        let end_char = cap end_char line in
-        let s = String.sub line start_char (end_char - start_char) in
-        Some s)
-      else (
-        let buffer = Buffer.create 1024 in
-        for current_line = start_line to end_line do
-          let line = input_line ic in
-          if current_line = start_line then (
-            Debugger.Log.log_to_file "start";
-            let start_char = cap start_char line in
-            let len = String.length line - start_char in
-            Buffer.add_substring buffer line start_char len)
-          else if current_line = end_line then (
-            Debugger.Log.log_to_file "end";
-            let len = cap end_char line in
-            Buffer.add_substring buffer line 0 len)
-          else (
-            Debugger.Log.log_to_file "mid";
-            Buffer.add_string buffer line);
-          Buffer.add_char buffer '\n'
-        done;
-        let s = Buffer.contents buffer in
-        Debugger.Log.log_to_file ("big: " ^ s);
-        Some s)
-  with
-  | End_of_file -> None
-
-
 type s =
   { typing_context : Context.t;
     solver : (solver * solver_frame) option;
@@ -104,30 +44,36 @@ let empty_s (c : Context.t) =
   }
 
 
-module Trace = struct
-  module DT = Debugger.Display_trace
+module Tree = struct
+  module DT = Debugger.Display_tree
   module Memo = Debugger.Memo
   open Context
   open Pp.Infix
 
-  type 'nest breakpoint'' =
-    | Msg of string Lazy.t
-    | Nest of string * 'nest
+  type step =
+    { msg : string;
+      ctx : Context.t;
+      backup_loc : Cerb_location.t option
+    }
 
-  type 'nest breakpoint' = (Context.t * Cerb_location.t option) * 'nest breakpoint''
+  type 'nest breakpoint' =
+    | Step of step
+    | Nest of 'nest
+    | Step_in
+    | Step_out
 
   type 'a next' = s * (s -> 'a)
 
-  type case' = string
-
   let map_next' (s, n) f = (s, fun s' -> f (n s'))
+
+  type case' = Branch_Eif of bool
 
   module Args = struct
     type 'a next = 'a next'
 
     type 'a breakpoint = 'a breakpoint'
 
-    type nonrec case = case'
+    type case = case'
 
     type nest_result = unit Or_TypeError.t
 
@@ -137,11 +83,14 @@ module Trace = struct
 
 
     let map_next = map_next'
-
-    let get_nested = function _, Nest (_, nest) -> [ nest ] | _ -> []
   end
 
   include T.Make_memoized (Args)
+
+  let show_case : case -> string = function
+    | Branch_Eif true -> "true"
+    | Branch_Eif false -> "false"
+
 
   let make_variable ?(name = "") ?type_ ?(children = []) ?(value = "") () =
     DT.Variable.{ name; value; type_; children }
@@ -205,15 +154,17 @@ module Trace = struct
         }
 
 
-  let display_context ((c, l) : Context.t * Cerb_location.t option) : DT.state =
+  let display_context (ctx : Context.t) (backup_loc : Cerb_location.t option) : DT.state =
     let vars : DT.Variable.ts =
-      [ ("Computational", display_sym_map c.computational);
-        ("Logical", display_sym_map c.logical);
-        ("Resources", List.map display_resource c.resources);
-        ("Constraints", display_constraints c.constraints)
+      [ ("Computational", display_sym_map ctx.computational);
+        ("Logical", display_sym_map ctx.logical);
+        ("Resources", List.map display_resource ctx.resources);
+        ("Constraints", display_constraints ctx.constraints)
       ]
     in
-    let frames = match make_stack_frame c.where l with Some f -> [ f ] | None -> [] in
+    let frames =
+      match make_stack_frame ctx.where backup_loc with Some f -> [ f ] | None -> []
+    in
     { vars; frames }
 
 
@@ -225,10 +176,9 @@ module Trace = struct
       let b' = display_breakpoint b in
       let n' = display_next n in
       Breakpoint (b', n')
-    | Choice (b, cs) ->
-      let b' = display_breakpoint b in
-      let cs' = List.map (fun (i, n) -> (i, display_next n)) cs in
-      Choice (b', cs')
+    | Choice cs ->
+      let cs' = List.mapi (fun i (c, n) -> ((show_case c, i), display_next n)) cs in
+      Choice cs'
 
 
   and display_next (n : unit Or_TypeError.t next) : DT.next =
@@ -237,27 +187,22 @@ module Trace = struct
     DT.T.next_of_memo memo'
 
 
-  and display_breakpoint (Bp (c, b)) =
-    let msg, nest =
-      match b with
-      | Msg s -> (Lazy.force s, [])
-      | Nest (s, nest) ->
-        let nest' = [ display_next nest ] in
-        (s, nest')
-    in
-    let state = lazy (display_context c) in
-    let get_state () = Lazy.force state in
-    DT.breakpoint ~msg ~nest ~get_state
+  and display_breakpoint = function
+    | Bp (Step { msg; ctx; backup_loc }) ->
+      let state = lazy (display_context ctx backup_loc) in
+      let get_state () = Lazy.force state in
+      DT.step get_state msg
+    | Bp (Nest n) -> DT.nest [ display_next n ]
+    | Bp Step_in -> DT.step_in
+    | Bp Step_out -> DT.step_out
 end
 
 open T
-open Trace
-
-type breakpoint = unit Or_TypeError.t Trace.next Trace.breakpoint'
+open Tree
 
 type 'a pause = ('a * s) Or_TypeError.t
 
-type 'a t = s -> ('a * s) Or_TypeError.t Trace.t
+type 'a t = s -> ('a * s) Or_TypeError.t Tree.t
 
 type 'a m = 'a t
 
@@ -281,7 +226,7 @@ let bind (m : 'a t) (f : 'a -> 'b t) : 'b t =
   fun s ->
   set_solver_frame s;
   let t = m s in
-  Trace.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
+  Tree.bind t @@ function Ok (x, s') -> (f x) s' | Error e -> end_error e
 
 
 let ( let@ ) = bind
@@ -301,52 +246,39 @@ let push_solver s =
   s'
 
 
-let breakpoint (b : breakpoint) : unit t = fun s -> Trace.breakpoint b (s, end_ok ())
-
-let choice ?(msg = "choice") (cases : (string * 'a t) list) : 'a t =
+let breakpoint (msg : string) : unit t =
   fun s ->
-  let b = Bp ((s.typing_context, s.backup_loc), Msg (Lazy.from_val msg)) in
-  let cs =
-    cases
-    |> List.map
-       @@ fun (label, m) ->
-       let s' = with_new_solver_frame s in
-       (label, Trace.next (s', m))
-  in
-  T.Choice (b, cs)
+  let b = Step { msg; ctx = s.typing_context; backup_loc = s.backup_loc } in
+  (* let b = ((s.typing_context, s.backup_loc), Msg msg) in *)
+  Tree.breakpoint b (s, end_ok ())
 
 
-let choose ?msg (cases : (string * 'a) list) : 'a t =
-  choice ?msg (List.map_snd return cases)
+let vanish : unit m = fun _ -> Vanish
 
+let step_in = fun s -> Tree.breakpoint Step_in (s, end_ok ())
 
-let collect_pauses (f : 'b -> 'a pause -> 'b) (acc : 'b) (m : 'a t) : 'b t =
+let step_out = fun s -> Tree.breakpoint Step_out (s, end_ok ())
+
+let choice (cases : (case * 'a t) list) : 'a t =
   fun s ->
-  let sub = next (with_new_solver_frame s, m) in
-  let sub' = map_next sub Or_TypeError.unit in
-  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
-  let m' =
-    fun s' ->
-    let t = compute_next sub in
-    let x = fold f acc t in
-    end_ok x s'
-  in
-  Trace.breakpoint b (with_new_solver_frame s, m')
+  let cs = cases |> List.map_snd @@ fun m -> Tree.next (with_new_solver_frame s, m) in
+  T.Choice cs
 
+
+let choose (cases : (case * 'a) list) : 'a t = choice (List.map_snd return cases)
 
 let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
   fun s ->
   let f = fun acc (x, _) -> f acc x in
   let sub = next (with_new_solver_frame s, m) in
-  let sub' = map_next sub Or_TypeError.unit in
-  let b = ((s.typing_context, s.backup_loc), Nest ("lol", sub')) in
+  let b = Nest (map_next sub Or_TypeError.unit) in
   let m' : 'b Or_TypeError.t t =
     fun s' ->
     let t = compute_next sub in
     let r = flaky_fold f acc t in
     end_ok r s'
   in
-  Trace.breakpoint b (with_new_solver_frame s, m')
+  Tree.breakpoint b (with_new_solver_frame s, m')
 
 
 let collect_unit = collect (fun () () -> ()) ()
@@ -360,12 +292,12 @@ let set_backup_loc (loc : Cerb_location.t) : unit t =
   fun s -> end_ok () { s with backup_loc = Some loc }
 
 
-let fold_unit (t : 'a pause Trace.t) : unit Or_TypeError.t =
+let fold_unit (t : 'a pause Tree.t) : unit Or_TypeError.t =
   let f () _ = () in
   flaky_fold f () t
 
 
-let fold_single (t : 'a pause Trace.t) : 'a pause =
+let fold_single (t : 'a pause Tree.t) : 'a pause =
   let f acc p = p :: acc in
   match flaky_fold f [] t with
   | Ok [ p ] -> Ok p
@@ -375,7 +307,7 @@ let fold_single (t : 'a pause Trace.t) : 'a pause =
 
 let pause_to_result (pause : 'a pause) : 'a Or_TypeError.t = Result.map fst pause
 
-let run (c : Context.t) (m : 'a t) : 'a pause Trace.t = m (empty_s c)
+let run (c : Context.t) (m : 'a t) : 'a pause Tree.t = m (empty_s c)
 
 let run_unit (c : Context.t) (m : 'a t) : unit Or_TypeError.t = run c m |> fold_unit
 
@@ -385,13 +317,13 @@ let run_single (c : Context.t) (m : 'a t) : 'a Or_TypeError.t =
   run_to_single_pause c m |> Result.map fst
 
 
-let run_from_pause' (f : 'a -> 'b t) (pause : 'a pause) : 'b pause Trace.t =
+let run_from_pause' (f : 'a -> 'b t) (pause : 'a pause) : 'b pause Tree.t =
   match pause with Ok (x, s) -> (f x) s | Error e -> End (Error e)
 
 
-let run_from_pause (f : 'a -> 'b t) (pause : 'a pause) : 'b Or_TypeError.t Trace.t =
+let run_from_pause (f : 'a -> 'b t) (pause : 'a pause) : 'b Or_TypeError.t Tree.t =
   let t = run_from_pause' f pause in
-  Trace.map t (Result.map fst)
+  Tree.map t (Result.map fst)
 
 
 let run_from_pause_unit (f : 'a -> 'b t) (pause : 'a pause) : unit Or_TypeError.t =
@@ -410,14 +342,14 @@ let pure (m : 'a t) : 'a t =
   fun s ->
   let s' = push_solver s in
   let t = m s' in
-  Trace.map t @@ Result.map @@ fun (x, _) -> (x, s)
+  Tree.map t @@ Result.map @@ fun (x, _) -> (x, s)
 
 
 let sandbox (m : 'a t) : 'a Or_TypeError.t t =
   fun s ->
   let s' = push_solver s in
   let t = m s' in
-  Trace.map t @@ function Ok (x, _) -> Ok (Ok x, s) | Error e -> Ok (Error e, s)
+  Tree.map t @@ function Ok (x, _) -> Ok (Ok x, s) | Error e -> Ok (Error e, s)
 
 
 let lift (m : 'a Or_TypeError.t) : 'a m =
@@ -474,18 +406,10 @@ let inspect (f : s -> 'a) : 'a t =
   return (f s)
 
 
-let modify' (f : s -> s * string Lazy.t option) : unit t =
+let modify (f : s -> s) : unit t =
   let@ s = get () in
-  let s', log = f s in
-  let m = set s' in
-  match log with
-  | Some msg ->
-    let@ () = breakpoint ((s'.typing_context, s'.backup_loc), Msg msg) in
-    m
-  | None -> m
+  set (f s)
 
-
-let modify (f : s -> s) : unit t = modify' (fun s -> (f s, None))
 
 let get_typing_context () : Context.t t = inspect (fun s -> s.typing_context)
 
@@ -515,38 +439,15 @@ let set_global (g : Global.t) : unit t =
   modify_typing_context (fun s -> { s with global = g })
 
 
-let show_action a =
-  let open Explain in
-  let open Pp in
-  let open Pp.Infix in
-  let doc : PPrint.document =
-    match a with
-    | Read (ptr, v) -> IT.pp v ^^ !^" = *" ^^ IT.pp ptr
-    | Write (ptr, v) -> !^"*" ^^ IT.pp ptr ^^ !^" = " ^^ IT.pp v
-    | Create a -> !^"Create " ^^ IT.pp a
-    | Kill a -> !^"Kill " ^^ IT.pp a
-    | Call { fsym; args; _ } -> Sym.pp fsym ^^ !^"(" ^^ list IT.pp args ^^ !^")"
-    | Return { arg; _ } -> !^"Return " ^^ IT.pp arg
-  in
-  Pp.plain doc
-
-
 let record_action ((a : Explain.action), (loc : Loc.t)) : unit t =
-  modify' (fun s ->
-    let log_entry = Explain.Action (a, loc) in
-    let msg = lazy ("<" ^ show_action a ^ ">") in
-    ({ s with log = log_entry :: s.log }, Some msg))
+  modify (fun s -> { s with log = Action (a, loc) :: s.log })
 
 
 let modify_where (f : Where.t -> Where.t) : unit t =
-  modify' (fun s ->
-    let log_entry = Explain.State s.typing_context in
-    let log = log_entry :: s.log in
+  modify (fun s ->
+    let log = Explain.State s.typing_context :: s.log in
     let typing_context = Context.modify_where f s.typing_context in
-    let msg =
-      lazy (Option.value ~default:"?" (get_source_in_where typing_context.where))
-    in
-    ({ s with log; typing_context }, Some msg))
+    { s with log; typing_context })
 
 
 module ErrorReader = struct
@@ -730,11 +631,11 @@ let remove_a sym =
 
 let remove_as = iterM remove_a
 
-(* let add_label_to_trace label =  *)
-(*   modify_typing_context (fun c -> Context.add_label_to_trace label c) *)
+(* let add_label_to_tree label =  *)
+(*   modify_typing_context (fun c -> Context.add_label_to_tree label c) *)
 
-(* let add_trace_item_to_trace i =  *)
-(*   modify_typing_context (fun c -> Context.add_trace_item_to_trace i c) *)
+(* let add_tree_item_to_tree i =  *)
+(*   modify_typing_context (fun c -> Context.add_tree_item_to_tree i c) *)
 
 (* similar but less boring functions, where components interact *)
 

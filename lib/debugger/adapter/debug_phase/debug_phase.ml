@@ -6,7 +6,7 @@ let handle_disconnect (module Cfg : Cfg) resolver =
   Cfg.handle_once
     (module Disconnect_command)
     (fun _ ->
-       Trace_debugger.terminate Cfg.dbg;
+       Tree_debugger.terminate Cfg.dbg;
        Lwt.wakeup_later_exn resolver Exit;
        Lwt.return_unit)
 

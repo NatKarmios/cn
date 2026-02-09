@@ -12,7 +12,7 @@ let handle_initialize (module Rpc : Rpc) resolver =
            ~supports_step_back:(Some true)
            ()
        in
-       let debugger = Trace_debugger.make () in
+       let debugger = Tree_debugger.make () in
        Lwt.wakeup_later resolver (init_args, caps, debugger);
        Lwt.return caps)
 

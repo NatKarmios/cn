@@ -83,9 +83,9 @@ module type Launch_command = COMMAND with type Result.t = Launch_command.Result.
 module type Launch = sig
   module Launch_command : Launch_command
 
-  type traces := ((string * Display_trace.t) list, string) result
+  type trees := ((string * Display_tree.t) list, string) result
 
-  val launch : Launch_command.Arguments.t -> traces
+  val launch : Launch_command.Arguments.t -> trees
 end
 
 let make_launch
@@ -108,7 +108,7 @@ module type Cfg = sig
 
   val init_args : Initialize_command.Arguments.t
 
-  val dbg : Trace_debugger.t
+  val dbg : Tree_debugger.t
 end
 
 let make_cfg (module Rpc : Rpc) init_args dbg (module Launch : Launch) : (module Cfg) =
@@ -121,7 +121,7 @@ let make_cfg (module Rpc : Rpc) init_args dbg (module Launch : Launch) : (module
 
     let send_stopped ?thread_id reason =
       Rpc.send_stopped ?thread_id reason;%lwt
-      Rpc.send (module Map_update_event) (Trace_debugger.get_map_update dbg)
+      Rpc.send (module Map_update_event) (Tree_debugger.get_map_update dbg)
 
 
     include Launch
