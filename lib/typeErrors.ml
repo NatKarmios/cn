@@ -818,3 +818,29 @@ let report_json
 let to_string_short e =
   let report = pp_message e.msg in
   Pp.plain report.short
+
+
+let get_ctx { msg; _ } =
+  match msg with
+  | Builtins _ | Compile _ | Global _ | WellTyped _ | Parse _ | Illtyped_binary_it _
+  | TooBigExponent _ | NegativeExponent _ | Unspecified _
+  | ((Generic _) [@alert "-deprecated"]) | Unsupported _ | Empty_provenance
+  | Byte_conv_needs_owned | Double_spec _ | Unsupported_byte_conv_ct _
+  | Number_spec_args _ | Not_impl_ghost_args_in_pure_C_function ->
+    None
+  | Missing_resource { ctxt; _ }
+  | Merging_multiple_arrays { ctxt; _ }
+  | Unused_resource { ctxt; _ }
+  | Write_value_unrepresentable { ctxt; _ }
+  | Int_unrepresentable { ctxt; _ }
+  | Unproven_constraint { ctxt; _ }
+  | Undefined_behaviour { ctxt; _ }
+  | Needs_alloc_id { ctxt; _ }
+  | Alloc_out_of_bounds { ctxt; _ }
+  | Allocation_not_live { ctxt; _ }
+  | StaticError { ctxt; _ }
+  | ((Generic_with_model { ctxt; _ }) [@alert "-deprecated"])
+  | Inconsistent_assumptions (_, ctxt)
+  | Unspecified_byte_to_int { ctxt; _ }
+  | Converting_from_unspecified_bytes { ctxt; _ } ->
+    Some ctxt

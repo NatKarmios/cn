@@ -195,3 +195,5 @@ val report_json
   unit
 
 val to_string_short : t -> string
+
+val get_ctx : t -> (Context.t * Explain.log) option

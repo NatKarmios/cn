@@ -80,7 +80,7 @@ let frontend
     else
       return ()
   in
-  let cabs_tunit = Option.get cabs_tunit_opt in
+  let cabs_tunit, cabs_index = Option.get cabs_tunit_opt in
   let markers_env, ail_prog = Option.get ail_prog_opt in
   CF.Tags.set_tagDefs prog0.CF.Core.tagDefs;
   let prog1 = CF.Remove_unspecs.rewrite_file prog0 in
@@ -94,7 +94,7 @@ let frontend
   let statement_locs = CStatements.search (snd ail_prog) in
   print_log_file ("original", `CORE prog0);
   print_log_file ("without_unspec", `CORE prog1);
-  return (cabs_tunit, prog3, (markers_env, ail_prog), statement_locs)
+  return (cabs_tunit, cabs_index, prog3, (markers_env, ail_prog), statement_locs)
 
 
 let handle_frontend_error = function
@@ -146,7 +146,7 @@ let check_well_formedness
       ~disable_linemarkers
       ~skip_label_inlining
   =
-  let cabs_tunit, prog, (markers_env, ail_prog), statement_locs =
+  let cabs_tunit, cabs_index, prog, (markers_env, ail_prog), statement_locs =
     handle_frontend_error
       (frontend
          ~cc
@@ -172,7 +172,7 @@ let check_well_formedness
   let paused =
     Typing.run_to_single_pause Context.empty (Check.check_decls_lemmata_fun_specs prog5)
   in
-  Ok (cabs_tunit, prog5, ail_prog, statement_locs, paused)
+  Ok (cabs_tunit, cabs_index, prog5, ail_prog, statement_locs, paused)
 
 
 let with_well_formedness_check
@@ -199,13 +199,14 @@ let with_well_formedness_check
        handle_error
       ~(f :
          cabs_tunit:CF.Cabs.translation_unit ->
+         cabs_index:CB.Cabs_index.t ->
          prog5:unit Mucore.file ->
          ail_prog:CF.GenTypes.genTypeCategory CF.AilSyntax.ail_program ->
          statement_locs:Cerb_location.t CStatements.LocMap.t ->
          paused:_ Typing.pause ->
          unit Or_TypeError.t)
   =
-  let cabs_tunit, prog, (markers_env, ail_prog), statement_locs =
+  let cabs_tunit, cabs_index, prog, (markers_env, ail_prog), statement_locs =
     handle_frontend_error
       (frontend
          ~cc
@@ -240,7 +241,7 @@ let with_well_formedness_check
           (Check.check_decls_lemmata_fun_specs prog5)
       in
       Result.iter_error handle_error (Typing.pause_to_result paused);
-      let@ () = f ~cabs_tunit ~prog5 ~ail_prog ~statement_locs ~paused in
+      let@ () = f ~cabs_tunit ~cabs_index ~prog5 ~ail_prog ~statement_locs ~paused in
       Option.iter
         (fun path ->
            let prologue = Pp_mucore_coq.pp_prologue () in

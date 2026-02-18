@@ -13,7 +13,8 @@ module LocCompare = struct
     (l.pos_lnum, l.pos_bol, l.pos_cnum, l.pos_fname)
 
 
-  let to_pre_cmp = function
+  let to_pre_cmp l =
+    match Cerb_location.get_loc l with
     | Cerb_location.Loc_unknown -> (0, [], [])
     | Cerb_location.Loc_other nm -> (1, [], [ nm ])
     | Cerb_location.Loc_point p -> (2, [ lex_to_cmp p ], [])

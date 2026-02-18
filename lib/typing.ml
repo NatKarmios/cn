@@ -11,27 +11,12 @@ type solver = Solver.solver
 
 type solver_frame = Solver.solver_frame
 
-let coalesce a b = match a with Some _ -> a | _ -> b
-
-let loc_of_where (w : Where.t) =
-  let ( let/ ) o f = match o with Some _ -> o | _ -> f () in
-  let/ () = w.expression in
-  let/ () = w.statement in
-  let/ () = match w.section with Some (Label { loc; _ }) -> Some loc | _ -> None in
-  let open Cerb_frontend.Symbol in
-  match w.fnction with
-  | Some (Symbol (_, _, sd)) ->
-    (match sd with SD_unnamed_tag loc | SD_FunArg (loc, _) -> Some loc | _ -> None)
-  | None -> None
-
-
 type s =
   { typing_context : Context.t;
     solver : (solver * solver_frame) option;
     sym_eqs : IT.t Sym.Map.t;
     movable_indices : (Req.name * IT.t) list;
-    log : Explain.log;
-    backup_loc : Cerb_location.t option
+    log : Explain.log
   }
 
 let empty_s (c : Context.t) =
@@ -39,25 +24,13 @@ let empty_s (c : Context.t) =
     solver = None;
     sym_eqs = Sym.Map.empty;
     movable_indices = [];
-    log = [];
-    backup_loc = loc_of_where c.where
+    log = []
   }
 
 
 module Tree = struct
-  module DT = Debugger.Display_tree
-  module Memo = Debugger.Memo
-  open Context
-  open Pp.Infix
-
-  type step =
-    { msg : string;
-      ctx : Context.t;
-      backup_loc : Cerb_location.t option
-    }
-
   type 'nest breakpoint' =
-    | Step of step
+    | Core_step of (BaseTypes.t Mucore.expr * Context.t)
     | Nest of 'nest
     | Step_in
     | Step_out
@@ -75,7 +48,7 @@ module Tree = struct
 
     type case = case'
 
-    type nest_result = unit Or_TypeError.t
+    type nest_result = Context.t Or_TypeError.t
 
     let compute_next (s, n) =
       Option.iter (fun (solver, frame) -> Solver.set_frame solver frame) s.solver;
@@ -86,115 +59,6 @@ module Tree = struct
   end
 
   include T.Make_memoized (Args)
-
-  let show_case : case -> string = function
-    | Branch_Eif true -> "true"
-    | Branch_Eif false -> "false"
-
-
-  let make_variable ?(name = "") ?type_ ?(children = []) ?(value = "") () =
-    DT.Variable.{ name; value; type_; children }
-
-
-  let display_sym_mapping ((sym, (bv, _)) : Sym.t * (Context.basetype_or_value * 'a))
-    : DT.Variable.t
-    =
-    let name = Pp.plain (Sym.pp sym) in
-    let value = Pp.plain (Context.pp_basetype_or_value bv) in
-    make_variable ~name ~value ()
-
-
-  let display_sym_map (map : (Context.basetype_or_value * 'a) Sym.Map.t)
-    : DT.Variable.t list
-    =
-    map |> Sym.Map.to_seq |> Seq.map display_sym_mapping |> List.of_seq
-
-
-  let display_resource (r : Res.t) : DT.Variable.t =
-    let value = Pp.plain (Resource.pp r) in
-    make_variable ~value ()
-
-
-  let display_constraint (lc : LC.t) : DT.Variable.t =
-    let name, value =
-      match lc with
-      | LC.T it -> ("", Pp.plain (IT.pp it))
-      | LC.Forall ((s, bt), it) ->
-        (Pp.plain (Pp.c_app !^"forall" [ Sym.pp s; BaseTypes.pp bt ]), Pp.plain (IT.pp it))
-    in
-    make_variable ~name ~value ()
-
-
-  let display_constraints (lcs : LC.Set.t) : DT.Variable.t list =
-    lcs |> LC.Set.to_seq |> Seq.map display_constraint |> List.of_seq
-
-
-  let make_stack_frame (w : Where.t) (backup_loc : Cerb_location.t option)
-    : DT.stack_frame option
-    =
-    let ( let* ) = Option.bind in
-    let* loc = coalesce (loc_of_where w) backup_loc in
-    let* start_pos = Locations.start_pos loc in
-    let start_line = Cerb_position.line start_pos in
-    let start_column = Cerb_position.column start_pos in
-    let source = Cerb_position.file start_pos in
-    let source = Some source in
-    let end_pos = Locations.end_pos' loc in
-    let end_line = Option.map Cerb_position.line end_pos in
-    let end_column = Option.map Cerb_position.column end_pos in
-    Some
-      DT.
-        { index = 0;
-          name = "TODO stack frame name";
-          source;
-          start_line;
-          start_column;
-          end_line;
-          end_column
-        }
-
-
-  let display_context (ctx : Context.t) (backup_loc : Cerb_location.t option) : DT.state =
-    let vars : DT.Variable.ts =
-      [ ("Computational", display_sym_map ctx.computational);
-        ("Logical", display_sym_map ctx.logical);
-        ("Resources", List.map display_resource ctx.resources);
-        ("Constraints", display_constraints ctx.constraints)
-      ]
-    in
-    let frames =
-      match make_stack_frame ctx.where backup_loc with Some f -> [ f ] | None -> []
-    in
-    { vars; frames }
-
-
-  let rec display : unit Or_TypeError.t t -> DT.t = function
-    | End (Ok ()) -> End (Ok "Ok")
-    | End (Error e) -> End (Error (TypeErrors.to_string_short e))
-    | Vanish -> Vanish
-    | Breakpoint (b, n) ->
-      let b' = display_breakpoint b in
-      let n' = display_next n in
-      Breakpoint (b', n')
-    | Choice cs ->
-      let cs' = List.mapi (fun i (c, n) -> ((show_case c, i), display_next n)) cs in
-      Choice cs'
-
-
-  and display_next (n : unit Or_TypeError.t next) : DT.next =
-    let memo = next_to_memo n in
-    let memo' = Memo.map memo display in
-    DT.T.next_of_memo memo'
-
-
-  and display_breakpoint = function
-    | Bp (Step { msg; ctx; backup_loc }) ->
-      let state = lazy (display_context ctx backup_loc) in
-      let get_state () = Lazy.force state in
-      DT.step get_state msg
-    | Bp (Nest n) -> DT.nest [ display_next n ]
-    | Bp Step_in -> DT.step_in
-    | Bp Step_out -> DT.step_out
 end
 
 open T
@@ -246,18 +110,19 @@ let push_solver s =
   s'
 
 
-let breakpoint (msg : string) : unit t =
+let breakpoint b : unit t = fun s -> Tree.breakpoint b (s, end_ok ())
+
+let core_step expr : unit t =
   fun s ->
-  let b = Step { msg; ctx = s.typing_context; backup_loc = s.backup_loc } in
-  (* let b = ((s.typing_context, s.backup_loc), Msg msg) in *)
-  Tree.breakpoint b (s, end_ok ())
+  let b = Core_step (expr, s.typing_context) in
+  breakpoint b s
 
 
 let vanish : unit m = fun _ -> Vanish
 
-let step_in = fun s -> Tree.breakpoint Step_in (s, end_ok ())
+let step_in = breakpoint Step_in
 
-let step_out = fun s -> Tree.breakpoint Step_out (s, end_ok ())
+let step_out = breakpoint Step_out
 
 let choice (cases : (case * 'a t) list) : 'a t =
   fun s ->
@@ -267,30 +132,10 @@ let choice (cases : (case * 'a t) list) : 'a t =
 
 let choose (cases : (case * 'a) list) : 'a t = choice (List.map_snd return cases)
 
-let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m : 'a t) : 'b Or_TypeError.t t =
-  fun s ->
-  let f = fun acc (x, _) -> f acc x in
-  let sub = next (with_new_solver_frame s, m) in
-  let b = Nest (map_next sub Or_TypeError.unit) in
-  let m' : 'b Or_TypeError.t t =
-    fun s' ->
-    let t = compute_next sub in
-    let r = flaky_fold f acc t in
-    end_ok r s'
-  in
-  Tree.breakpoint b (with_new_solver_frame s, m')
-
-
-let collect_unit = collect (fun () () -> ()) ()
-
 let get () : s t = fun s -> end_ok s s
 
 (* due to solver interaction, this has to be used carefully *)
 let set (s' : s) : unit t = fun _s -> end_ok () s'
-
-let set_backup_loc (loc : Cerb_location.t) : unit t =
-  fun s -> end_ok () { s with backup_loc = Some loc }
-
 
 let fold_unit (t : 'a pause Tree.t) : unit Or_TypeError.t =
   let f () _ = () in
@@ -449,6 +294,22 @@ let modify_where (f : Where.t -> Where.t) : unit t =
     let typing_context = Context.modify_where f s.typing_context in
     { s with log; typing_context })
 
+
+let collect (f : 'b -> 'a -> 'b) (acc : 'b) (m_sub : 'a t) : 'b Or_TypeError.t t =
+  fun s ->
+  let f = fun acc (x, _) -> f acc x in
+  let sub = next (with_new_solver_frame s, m_sub) in
+  let b = Nest (map_next sub (Result.map (fun (_, s) -> s.typing_context))) in
+  let m : 'b Or_TypeError.t t =
+    fun s' ->
+    let t = compute_next sub in
+    let r = flaky_fold f acc t in
+    end_ok r s'
+  in
+  Tree.breakpoint b (with_new_solver_frame s, m)
+
+
+let collect_unit = collect (fun () _ -> ()) ()
 
 module ErrorReader = struct
   type nonrec 'a t = 'a t

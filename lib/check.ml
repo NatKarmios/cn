@@ -34,6 +34,7 @@ let rec check_and_match_pattern (Mu.Pattern (loc, _, bty, pattern)) it =
   | CaseBase (o_s, _has_cbt) ->
     (match o_s with
      | Some s ->
+       Debugger.Log.log_to_file ("binding " ^ Pp.plain (Sym.pp s));
        let@ () = add_a_value s it (loc, lazy (Sym.pp s)) in
        return ([ s ], [])
      | None -> return ([], []))
@@ -1170,6 +1171,7 @@ module Spine : sig
   val subtype : Locations.t -> LRT.t -> (unit -> unit m) -> unit m
 end = struct
   let spine_l rt_subst rt_pp loc (situation : call_situation) ftyp k =
+    let () = Debugger.Log.log_to_file "Spine!" in
     let start_spine = time_start () in
     let@ original_resources = all_resources loc in
     let@ rt =
@@ -1180,6 +1182,9 @@ end = struct
             debug 6 (lazy (item "spec" (LAT.pp rt_pp ftyp))))
         in
         let uiinfo = ((Call situation : situation), []) in
+        let () =
+          Debugger.Log.log_to_file ("Checking " ^ Pp.plain (LAT.pp (fun _ -> !^"?") ftyp))
+        in
         let@ ftyp =
           RI.General.ftyp_args_request_step rt_subst loc uiinfo original_resources ftyp
         in
@@ -1576,8 +1581,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
     let here = Locations.other __LOC__ in
     bytes_qpred sym (sizeOf_ ct here) pointer init
   in
-  let pp_e () = Pp.plain @@ Pp_mucore.pp_expr_w (Some 3) e in
-  let@ () = breakpoint (pp_e ()) in
+  let@ () = core_step e in
   match e_ with
   | Epure pe ->
     let@ () = WellTyped.ensure_base_type loc ~expect (Mu.bt_of_pexpr pe) in
@@ -1795,6 +1799,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
              arrayShift_ ~base:vt1 ct ~index:(cast_ Memory.uintptr_bt vt2 loc) loc
            in
            let@ has_owned = valid_for_deref loc result ct in
+           (* TODO: is this intentional? If has_owned is true, then k is used identically twice *)
            let@ () =
              if has_owned then
                k result
@@ -2752,7 +2757,6 @@ let select_functions (skip_and_only : string list * string list) (fsyms : Sym.Se
 
 (** Check a single C function. Failure of the check is encoded monadically. *)
 let check_c_function ((fsym, (loc, args_and_body)) : c_function) : unit m =
-  let@ () = set_backup_loc loc in
   check_procedure loc fsym args_and_body
 
 
@@ -3085,7 +3089,7 @@ let trace_check_c_functions
       skip_and_only
       check_consistency
       (global_var_constraints, (checked : c_function list))
-  : (string * unit m) list m
+  : (string * Cerb_location.t * unit m) list m
   =
   let@ () = init_check check_consistency global_var_constraints checked in
   let selected_fsyms =
@@ -3096,7 +3100,9 @@ let trace_check_c_functions
   in
   return
     (List.map
-       (fun c_fun -> (c_function_name c_fun, check_c_function c_fun))
+       (fun c_fun ->
+          let _, (locs, _) = c_fun in
+          (c_function_name c_fun, locs, check_c_function c_fun))
        selected_funs)
 
 (* TODO:

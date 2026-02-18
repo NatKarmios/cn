@@ -94,8 +94,8 @@ let join_snippets (loc1, str1) (loc2, str2) : Locations.t * string =
     | L.Loc_other _ -> assert false
     | L.Loc_regions _ -> assert false
   in
-  let s1, e1 = start_and_end loc1 in
-  let s2, e2 = start_and_end loc2 in
+  let s1, e1 = start_and_end (L.get_loc loc1) in
+  let s2, e2 = start_and_end (L.get_loc loc2) in
   let loc = L.region (s1, e2) NoCursor in
   let str =
     if P.line e1 = P.line s2 then (

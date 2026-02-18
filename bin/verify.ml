@@ -94,7 +94,7 @@ let verify
     ~disable_linemarkers:false
     ~skip_label_inlining:false
     ~handle_error:(Common.handle_type_error ~json ?output_dir ~serialize_json:json_trace)
-    ~f:(fun ~cabs_tunit:_ ~prog5:_ ~ail_prog:_ ~statement_locs:_ ~paused ->
+    ~f:(fun ~cabs_tunit:_ ~cabs_index:_ ~prog5:_ ~ail_prog:_ ~statement_locs:_ ~paused ->
       let check (functions, global_var_constraints, lemmas) =
         let open Typing in
         let@ errors =
@@ -407,7 +407,7 @@ module Debug = struct
           ~disable_linemarkers:false
           ~skip_label_inlining:false
       in
-      let* _, _, _, _, paused = wf_check |> Or_TypeError.to_string_error in
+      let* _, cabs_index, _, _, _, paused = wf_check |> Or_TypeError.to_string_error in
       let check (functions, global_var_constraints, _) =
         Check.trace_check_c_functions
           (skip, only)
@@ -421,10 +421,21 @@ module Debug = struct
         |> Or_TypeError.to_string_error
       in
       let traces =
-        List.map_snd
-          (fun check ->
-             let trace = Typing.run_from_pause (fun _ -> pure check) checks_pause in
-             Typing.Tree.display trace)
+        List.map
+          (fun (name, backup_loc, check) ->
+             let trace =
+               Typing.run_from_pause
+                 (fun _ ->
+                    pure
+                      (let@ () = check in
+                       get_typing_context ()))
+                 checks_pause
+             in
+             let tree =
+               Display_typing_tree.Lifted.display ~cabs_index ~backup_loc trace
+             in
+             (* let tree = Display_typing_tree.Core_level.display ~backup_loc trace in *)
+             (name, tree))
           checks
       in
       Ok traces

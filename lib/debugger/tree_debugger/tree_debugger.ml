@@ -4,6 +4,8 @@ open struct
   include Map_node_extra
   module Stop_reason = Stopped_event.Payload.Reason
   module StringSet = Set.Make (String)
+
+  let show_vanish = true
 end
 
 let ( let> ) o f = o f
@@ -233,7 +235,7 @@ module Tree_processing = struct
 
   type processed_tree =
     | Step_again of (int * float list * string list * Display_tree.next) list
-    | Reached_bp of (int -> computed_next) list
+    | Stop of (int -> computed_next) list
 
   let process_tree ~step_dir ~branch_path ~labels tree t =
     let open Tree in
@@ -245,13 +247,12 @@ module Tree_processing = struct
       Step_again [ (x + 1, branch_path, labels, n) ]
     | Breakpoint (Bp (Step_in | Step_out), _), _ -> failwith "Malformed tree"
     | Breakpoint (Bp (Nest _), _), _ -> failwith "TODO: nest"
-    | Vanish, _ -> Reached_bp [ mk_next "Vanish" ]
-    | End r, _ ->
-      let msg = match r with Ok msg | Error msg -> msg in
-      let highlight = Highlight.(if Result.is_ok r then Success else Error) in
-      Reached_bp [ mk_next ~highlight msg ]
+    | Vanish, _ -> if show_vanish then Stop [ mk_next "Vanish" ] else Stop []
+    | End ({ ok; msg; get_state } : Display_tree.t'), _ ->
+      let highlight = Highlight.(if ok then Success else Error) in
+      Stop [ mk_next ~highlight ~get_state msg ]
     | Breakpoint (Bp (Step { msg; get_state }), n), _ ->
-      Reached_bp [ mk_next ~n ~get_state msg ]
+      Stop [ mk_next ~n ~get_state msg ]
     | Choice c, _ ->
       let c =
         List.sort (fun ((_, case), _) ((_, case'), _) -> Int.compare case case') c
@@ -271,7 +272,7 @@ module Tree_processing = struct
     let rec aux (step_dir, branch_path, labels, n) =
       let tree = Display_tree.T.compute_next n in
       match process_tree ~step_dir ~branch_path ~labels tree t with
-      | Reached_bp nexts -> nexts
+      | Stop nexts -> nexts
       | Step_again steps -> List.concat_map aux steps
     in
     aux (0, [], [], n) |> List.mapi (fun i mk_next -> mk_next i)
@@ -288,7 +289,7 @@ module Tree_processing = struct
   (*   let rec aux (step_dir, branch_path, labels, n) = *)
   (*     Option.bind (Display_tree.T.poll_next n) (fun tree -> *)
   (*       match process_tree ~step_dir ~branch_path ~labels tree t with *)
-  (*       | Reached_bp nexts -> Some nexts *)
+  (*       | Stop nexts -> Some nexts *)
   (*       | Step_again steps -> flaky_map aux steps |> Option.map List.concat) *)
   (*   in *)
   (*   aux (0, [], [], n) |> Option.map (List.mapi (fun i mk_next -> mk_next i)) *)
@@ -451,8 +452,6 @@ module Tree_processing = struct
   let rec step_over_at' ?(depth = 0) node_id t =
     let _, step = get_step_node node_id t in
     let indent = String.make (depth * 2) ' ' in
-    Log.log_to_file
-      (Fmt.str "%sStepping over %s...\n%s%s" indent node_id indent step.display);
     let rec aux () =
       match step.status with
       | Completed ->
@@ -619,7 +618,7 @@ module Inspect = struct
     let/ () = ([], Hashtbl.create 0) in
     let+ _, { vars; _ } = get_active_state t in
     let variables = Hashtbl.create 0 in
-    let add_var parent var =
+    let add_var parent (var : Variable.t) =
       let vars = Option.value ~default:[] (Hashtbl.find_opt variables parent) in
       Hashtbl.replace variables parent (var :: vars)
     in

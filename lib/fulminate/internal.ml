@@ -193,10 +193,11 @@ let generate_c_specs_from_cn_internal
   let pre_str = generate_ail_stat_strs ail_executable_spec.pre in
   let post_str = generate_ail_stat_strs ail_executable_spec.post in
   (* Needed for extracting correct location for CN statement injection *)
-  let modify_magic_comment_loc loc =
+  let modify_magic_comment_loc (Cerb_location.CLoc (loc, id)) =
     match loc with
     | Cerb_location.Loc_region (start_pos, end_pos, cursor) ->
       Cerb_location.region
+        ?id
         (Cerb_position.change_cnum start_pos (-3), Cerb_position.change_cnum end_pos 2)
         cursor
     | _ -> assert false (* loc should always be a region *)

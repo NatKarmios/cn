@@ -64,7 +64,7 @@ let run_seq_tests
     ~disable_linemarkers:true
     ~skip_label_inlining:true
     ~handle_error
-    ~f:(fun ~cabs_tunit ~prog5 ~ail_prog ~statement_locs:_ ~paused:_ ->
+    ~f:(fun ~cabs_tunit ~cabs_index:_ ~prog5 ~ail_prog ~statement_locs:_ ~paused:_ ->
       Cerb_colour.without_colour
         (fun () ->
            let _, sigma = ail_prog in

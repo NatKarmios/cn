@@ -33,7 +33,11 @@ type 'nest breakpoint =
   | Step_in
   | Step_out
 
-type t' = (string, string) Result.t
+type t' =
+  { msg : string;
+    get_state : unit -> state;
+    ok : bool
+  }
 
 module T = Tree.Make_memoized (struct
     type nonrec 'nest breakpoint = 'nest breakpoint

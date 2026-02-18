@@ -191,7 +191,8 @@ let[@warning "-32" (* unused-value-declaration *)] create_declaration sym decl =
   (sym, (Cerb_location.unknown, CF.Annot.Attrs [], decl))
 
 
-let get_start_loc ?(offset = 0) = function
+let get_start_loc ?(offset = 0) l =
+  match Cerb_location.get_loc l with
   | Cerb_location.Loc_region (start_pos, _, _) ->
     let new_start_pos = Cerb_position.change_cnum start_pos offset in
     Cerb_location.point new_start_pos
@@ -208,7 +209,8 @@ let get_start_loc ?(offset = 0) = function
     failwith "get_start_loc: Location should be Loc_region, Loc_regions or Loc_point"
 
 
-let get_end_loc ?(offset = 0) = function
+let get_end_loc ?(offset = 0) l =
+  match Cerb_location.get_loc l with
   | Cerb_location.Loc_region (_, end_pos, _) ->
     let new_end_pos = Cerb_position.change_cnum end_pos offset in
     Cerb_location.point new_end_pos
@@ -227,7 +229,8 @@ let get_end_loc ?(offset = 0) = function
 
 (* In the style of Cerb_location.line_numbers *)
 (* TODO: Move to Cerberus (Cerb_location.ml) *)
-let line_and_column_numbers = function
+let line_and_column_numbers l =
+  match Cerb_location.get_loc l with
   | Cerb_location.Loc_unknown -> None
   | Loc_other _ -> None
   | Loc_point p -> Some ((CP.line p, CP.line p), (CP.column p, CP.column p))
@@ -237,7 +240,8 @@ let line_and_column_numbers = function
   | Loc_regions ([], _) -> None
 
 
-let from_same_file = function
+let from_same_file (l1, l2) =
+  match (Cerb_location.get_loc l1, Cerb_location.get_loc l2) with
   | Cerb_location.Loc_unknown, _ | Loc_other _, _ | Loc_regions ([], _), _ -> false
   | Loc_point pos, Cerb_location.Loc_point pos'
   | Loc_region (pos, _, _), Loc_region (pos', _, _)

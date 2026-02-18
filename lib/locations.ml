@@ -61,41 +61,44 @@ let unpack l = l
 
 type region = Cerb_position.t * Cerb_position.t
 
-let point = Cerb_location.point
+let point = Cerb_location.point ?id:None
 
-let region = Cerb_location.region
+let region = Cerb_location.region ?id:None
 
-let regions = Cerb_location.regions
+let regions = Cerb_location.regions ?id:None
 
 let simple_location = Cerb_location.simple_location
 
 let line_numbers = Cerb_location.line_numbers
 
-let is_region = function Cerb_location.Loc_region (l, r, _) -> Some (l, r) | _ -> None
+let is_region = function
+  | Cerb_location.CLoc (Loc_region (l, r, _), _) -> Some (l, r)
+  | _ -> None
+
 
 let start_pos = function
-  | Cerb_location.Loc_point loc | Loc_region (loc, _, _) | Loc_regions ((loc, _) :: _, _)
-    ->
+  | Cerb_location.CLoc
+      ((Loc_point loc | Loc_region (loc, _, _) | Loc_regions ((loc, _) :: _, _)), _) ->
     Some loc
   | _ -> None
 
 
 let end_pos = function
-  | Cerb_location.Loc_point loc | Loc_region (_, loc, _) -> Some loc
-  | Loc_regions (list, _) ->
+  | Cerb_location.CLoc ((Loc_point loc | Loc_region (_, loc, _)), _) -> Some loc
+  | CLoc (Loc_regions (list, _), _) ->
     (* can't use Option module without a cyclic dependency? *)
     (match List.last list with None -> None | Some (_, loc) -> Some loc)
   | _ -> None
 
 
 let end_pos' = function
-  | Cerb_location.Loc_region (_, loc, _) -> Some loc
-  | Loc_regions (list, _) ->
+  | Cerb_location.CLoc (Loc_region (_, loc, _), _) -> Some loc
+  | CLoc (Loc_regions (list, _), _) ->
     (* can't use Option module without a cyclic dependency? *)
     (match List.last list with None -> None | Some (_, loc) -> Some loc)
   | _ -> None
 
 
 let get_region = function
-  | Cerb_location.Loc_region (start, end_, cursor) -> Some (start, end_, cursor)
+  | Cerb_location.CLoc (Loc_region (start, end_, cursor), _) -> Some (start, end_, cursor)
   | _ -> None

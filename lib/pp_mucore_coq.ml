@@ -478,7 +478,8 @@ let pp_location_cursor = function
       [ pp_lexing_position start_pos; pp_lexing_position end_pos ]
 
 
-let pp_location = function
+let pp_location l =
+  match Cerb_location.get_loc l with
   | Cerb_location.Loc_unknown -> pp_constructor0 "Loc_unknown"
   | _ when not debug_print_locations -> pp_constructor0 "Loc_unknown"
   | Cerb_location.Loc_other s -> pp_constructor "Loc_other" [ pp_string s ]

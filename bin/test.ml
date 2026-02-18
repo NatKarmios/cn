@@ -113,7 +113,7 @@ let run_tests
     ~disable_linemarkers:true
     ~skip_label_inlining:true
     ~handle_error
-    ~f:(fun ~cabs_tunit ~prog5 ~ail_prog ~statement_locs:_ ~paused ->
+    ~f:(fun ~cabs_tunit ~cabs_index:_ ~prog5 ~ail_prog ~statement_locs:_ ~paused ->
       let config : TestGeneration.config =
         { skip_and_only = (skip, only);
           cc;

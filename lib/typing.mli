@@ -5,14 +5,8 @@ type 'a t
 type 'a m = 'a t
 
 module Tree : sig
-  type step =
-    { msg : string;
-      ctx : Context.t;
-      backup_loc : Cerb_location.t option
-    }
-
   type 'nest breakpoint' =
-    | Step of step
+    | Core_step of (BaseTypes.t Mucore.expr * Context.t)
     | Nest of 'nest
     | Step_in
     | Step_out
@@ -22,12 +16,11 @@ module Tree : sig
   type case' = Branch_Eif of bool
 
   include
-    Debugger.Tree.S
+    Debugger.Tree.S_memoized
     with type 'nest breakpoint' := 'nest breakpoint'
      and type 'a next' := 'a next'
      and type case = case'
-
-  val display : (unit, TypeErrors.t) Result.t t -> Debugger.Display_tree.t
+     and type nest_result = (Context.t, TypeErrors.t) Result.t
 end
 
 type failure = Context.t * Explain.log -> TypeErrors.t
@@ -44,9 +37,7 @@ val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 
 val fail : failure -> 'a m
 
-val set_backup_loc : Cerb_location.t -> unit m
-
-val breakpoint : string -> unit m
+val core_step : BaseTypes.t Mucore.expr -> unit m
 
 val vanish : unit m
 
