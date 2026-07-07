@@ -433,8 +433,9 @@ module Debug = struct
              in
              let tree =
                Display_typing_tree.Lifted.display ~cabs_index ~backup_loc trace
+               (* ignore cabs_index; *)
+               (* Display_typing_tree.Core_level.display ~backup_loc trace *)
              in
-             (* let tree = Display_typing_tree.Core_level.display ~backup_loc trace in *)
              (name, tree))
           checks
       in

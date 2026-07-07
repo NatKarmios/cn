@@ -31,6 +31,8 @@ let empty_s (c : Context.t) =
 module Tree = struct
   type 'nest breakpoint' =
     | Core_step of (BaseTypes.t Mucore.expr * Context.t)
+    | Proc_start of Context.t
+    | Proc_end of Context.t
     | Nest of 'nest
     | Step_in
     | Step_out
@@ -117,6 +119,10 @@ let core_step expr : unit t =
   let b = Core_step (expr, s.typing_context) in
   breakpoint b s
 
+
+let proc_start : unit t = fun s -> breakpoint (Proc_start s.typing_context) s
+
+let proc_end : unit t = fun s -> breakpoint (Proc_end s.typing_context) s
 
 let vanish : unit m = fun _ -> Vanish
 

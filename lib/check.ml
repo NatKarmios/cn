@@ -1799,10 +1799,9 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
              arrayShift_ ~base:vt1 ct ~index:(cast_ Memory.uintptr_bt vt2 loc) loc
            in
            let@ has_owned = valid_for_deref loc result ct in
-           (* TODO: is this intentional? If has_owned is true, then k is used identically twice *)
            let@ () =
              if has_owned then
-               k result
+               return ()
              else (
                let unspec = CF.Undefined.UB_unspec_pointer_add in
                let@ () = check_has_alloc_id loc vt1 unspec in
@@ -2387,6 +2386,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
           })
       | Some (lt, lkind, _) -> return (lt, lkind)
     in
+    let@ () = proc_end in
     let@ original_resources = all_resources loc in
     Spine.calltype_lt loc pes None (lt, lkind) (fun False ->
       let@ () = all_empty loc original_resources in
@@ -2396,6 +2396,7 @@ let rec check_expr labels (e : BT.t Mu.expr) (k : IT.t -> unit m) : unit m =
 let check_expr_top loc labels rt e =
   let@ () = WellTyped.ensure_base_type loc ~expect:Unit (Mu.bt_of_expr e) in
   check_expr labels e (fun lvt ->
+    let@ () = proc_end in
     let (RT.Computational ((return_s, return_bt), _info, lrt)) = rt in
     match return_bt with
     | Unit ->
@@ -2463,6 +2464,7 @@ let check_procedure
   debug 2 (lazy (headline ("checking procedure " ^ Sym.pp_string fsym)));
   pure
     (let@ () = modify_where (Where.set_function fsym) in
+     let@ () = proc_start in
      let@ (body, label_defs, rt), initial_resources = bind_arguments loc args_and_body in
      let label_context = WellTyped.label_context rt label_defs in
      let label_defs = Pmap.bindings_list label_defs in

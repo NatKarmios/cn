@@ -71,6 +71,7 @@ end
 let make_alloc pointer = Predicate.{ name = alloc; pointer; iargs = [] }
 
 module QPredicate = struct
+  (* each (q; permission) { name(pointer + q @ step, ...iargs) } *)
   type t =
     { name : name;
       pointer : IT.t; (* I *)

@@ -7,6 +7,8 @@ type 'a m = 'a t
 module Tree : sig
   type 'nest breakpoint' =
     | Core_step of (BaseTypes.t Mucore.expr * Context.t)
+    | Proc_start of Context.t
+    | Proc_end of Context.t
     | Nest of 'nest
     | Step_in
     | Step_out
@@ -38,6 +40,10 @@ val ( let@ ) : 'a m -> ('a -> 'b m) -> 'b m
 val fail : failure -> 'a m
 
 val core_step : BaseTypes.t Mucore.expr -> unit m
+
+val proc_start : unit m
+
+val proc_end : unit m
 
 val vanish : unit m
 
